@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "winter-image-daemon"
+version = "0.1"
+authors = [
+  { name="Nathan Lourie", email="nlourie@mit.edu" },
+]
+description = "The WINTER Image Daemon"
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "scipy",
+    "astropy",
+    "PySide6",
+    "pyro5",
+    "sqlalchemy",
+    "pyyaml",
+    "slack_sdk",
+    "pyserial",
+    "psycopg",
+    "python-dotenv",
+    "mirar",
+    "tqdm",
+    "photutils",
+
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff",
+    "black",
+    "isort",
+    "spyder",
+]
+
+[tool.setuptools]
+packages = ["imagedaemon"]
