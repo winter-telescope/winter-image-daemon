@@ -2,8 +2,8 @@
 import os
 from glob import glob
 
-from imagedaemon.astrometry import calibrate_and_solve
-from imagedaemon.paths import RAW_DATA_DIR
+from imagedaemon.analysis import calibrate_and_solve
+from imagedaemon.utils.paths import RAW_DATA_DIR
 
 bkg_dir = os.path.join(RAW_DATA_DIR, "winter", "science", "30s", "bkg")
 science_dir = os.path.join(RAW_DATA_DIR, "winter", "science", "30s")

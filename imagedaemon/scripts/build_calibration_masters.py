@@ -15,7 +15,7 @@ from imagedaemon.calibration.master_frame_builder import (
 )
 from imagedaemon.image.image_operations import median_combine_images
 from imagedaemon.image.winter_image import WinterImage
-from imagedaemon.paths import CAL_DATA_DIR, RAW_DATA_DIR
+from imagedaemon.utils.paths import CAL_DATA_DIR, RAW_DATA_DIR
 
 # --------------------------------------------------------------------------
 # Build master frames for WINTER camera
