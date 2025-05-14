@@ -1,0 +1,10 @@
+service_name: "imagedaemon-winter"
+cameras: "winter"
+env: "imagedaemon"
+user: "winter"
+group: "winter"
+log_dir: "/var/log/imagedaemon"
+wrapper_dir: "/usr/local/bin"
+unit_dir: "/etc/systemd/system"
+ns_host: "192.168.1.10"
+auto_start: true

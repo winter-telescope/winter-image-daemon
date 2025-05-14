@@ -193,14 +193,14 @@ class BasePipelines:
         # ------------------------------------------------------------------
         # 5. run solve‑field in the same work dir --------------------------
         with cleanup_ctx:  # deletes tmp dir if needed
-            wcs = astrometry.run_astrometry(
+            info = astrometry.run_astrometry(
                 cal_path,
                 ra=ra,
                 dec=dec,
                 output_dir=None,  # already in the right place
                 **astrometry_opts,
             )
-            return wcs
+            return info
 
     # ======================================================================
     #   HELPER METHODS  (meant to be overridden by camera subclasses)

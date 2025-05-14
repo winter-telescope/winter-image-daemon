@@ -10,6 +10,7 @@ from typing import List, Union
 
 import numpy as np
 from astropy.io import fits
+from astropy.wcs.utils import proj_plane_pixel_scales
 
 from imagedaemon.utils.image import Image
 from imagedaemon.utils.wcs_utils import wcs_from_header  # your helper
@@ -108,9 +109,30 @@ def run_astrometry(
         solved_image = Image(solved_path)
         wcs = wcs_from_header(solved_image.header)
 
+        # ---------------------- extra info to return ---------------------
+        hdr = solved_image.header
+        width = hdr.get("IMAGEW") or hdr.get("NAXIS1")
+        height = hdr.get("IMAGEH") or hdr.get("NAXIS2")
+
+        # pixel scale (arcsec/px)  — returns array([scale_x, scale_y]) in degrees
+        scale_deg = proj_plane_pixel_scales(wcs)  # deg / pix
+        pixel_scale = float(scale_deg.mean() * 3600.0)  # arcsec / pix
+
+        # rotation angle (deg, "east of north")
+        cd = wcs.wcs.cd if wcs.wcs.has_cd() else wcs.wcs.pc
+        rot_rad = np.arctan2(-cd[0, 1], cd[1, 1])  # radians
+        rotation_deg = float(np.degrees(rot_rad))
+
     # At this point:
     #   * tmp mode: tmpdir is gone, but we already parsed the WCS.
     #   * explicit output_dir: all artefacts kept there.
     #   * output_dir is None: artefacts live next to original FITS.
 
-    return wcs
+    return {
+        "wcs": wcs,  # full astropy.wcs.WCS object
+        "image_width": width,
+        "image_height": height,
+        "pixel_scale": pixel_scale,  # arcsec / pixel
+        "rotation_deg": rotation_deg,
+        "solved_fits": str(solved_path),
+    }
