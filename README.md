@@ -1,9 +1,6 @@
 # WINTER Image Daemon Repository
 
-This is a code repository for the WINTER observatory. It should include all the control code to run the robotic observatory, as well as the scheduler.
-
-This repository is separate from the instrument development repository.
-
+This is a package which manages a daemon which handles image analysis operations for all cameras on the WINTER observatory. It maintains basic capabilities that are needed across cameras, such as focus, basic calibration, and the ability to run astrometry for building sky models for the telescope pointing.
 
 ## Getting the python environment set up
 
