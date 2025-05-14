@@ -63,6 +63,8 @@ class CameraWorker(QtCore.QObject):
         return {
             "ra": ra_deg,
             "dec": dec_deg,
+            "ra_guess": info["ra_guess"],
+            "dec_guess": info["dec_guess"],
             "pix_coords": pix_coords,
             "pixel_scale": info["pixel_scale"],
             "rotation_deg": info["rotation_deg"],

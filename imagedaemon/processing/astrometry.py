@@ -152,6 +152,9 @@ def run_astrometry(
 
     return {
         "wcs": wcs,  # full astropy.wcs.WCS object
+        "ra_guess": ra,
+        "dec_guess": dec,
+        "radius_deg": radius,
         "image_width": width,
         "image_height": height,
         "pixel_scale": pixel_scale,  # arcsec / pixel
