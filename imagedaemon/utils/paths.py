@@ -3,11 +3,11 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[1]  # adjust depth to reach repo root
-_ENV_FILE = _PROJECT_ROOT / ".env"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]  # adjust depth to reach repo root
+ENV_FILE = PROJECT_ROOT / ".env"
 
 # Load once when the module is imported
-load_dotenv(dotenv_path=_ENV_FILE, override=False)  # keeps any values already set
+load_dotenv(dotenv_path=ENV_FILE, override=False)  # keeps any values already set
 
 
 def get_path(name: str, default: str | Path | None = None) -> Path:
@@ -21,15 +21,15 @@ def get_path(name: str, default: str | Path | None = None) -> Path:
     if value is None:
         if default is None:
             raise KeyError(
-                f"Environment variable '{name}' not found in {_ENV_FILE} "
+                f"Environment variable '{name}' not found in {ENV_FILE} "
                 "and no default provided."
             )
         value = default
     return Path(value).expanduser().resolve()
 
 
-CONFIG_DIR = get_path("CONFIG_DIR", Path(_PROJECT_ROOT, "imagedaemon", "config"))
-print(f"_PROJECT_ROOT = {_PROJECT_ROOT}")
+CONFIG_DIR = get_path("CONFIG_DIR", Path(PROJECT_ROOT, "imagedaemon", "config"))
+print(f"PROJECT_ROOT = {PROJECT_ROOT}")
 print(f"CONFIG_DIR = {CONFIG_DIR}")
 
 DATA_DIR = get_path(

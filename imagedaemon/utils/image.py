@@ -9,6 +9,7 @@ import numpy.typing as npt
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 from astropy.visualization import ImageNormalize, SqrtStretch, ZScaleInterval
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 class Image:
@@ -90,7 +91,7 @@ class Image:
             mask = self.mask
         else:
             mask = None
-        plot_image(
+        ax = plot_image(
             self.data,
             title=title,
             cbar=cbar,
@@ -99,6 +100,7 @@ class Image:
             mask=mask,
             **kwargs,
         )
+        return ax
 
     def save_image(self, filename: str | Path, overwrite: bool = True) -> None:
         """
@@ -152,6 +154,7 @@ def plot_image(
     mask=None,
     title=None,
     cbar=False,
+    figsize=(6, 6),
     **kwargs: Any,
 ):
     """
@@ -189,7 +192,7 @@ def plot_image(
     """
     # Create ax if not provided
     if ax is None:
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=figsize)
 
     # Handle default window boundaries
     if x_min is None:
@@ -248,12 +251,16 @@ def plot_image(
             norm=norm,
             **kwargs,
         )
-
-    cbar = plt.colorbar(im, ax=ax)
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    plt.colorbar(im, cax=cax)  # Similar to fig.colorbar(im, cax = cax)
+    # cbar = plt.colorbar(im, ax=ax)
 
     # Set the title if provided
     if title is not None:
         ax.set_title(title)
+
+    plt.tight_layout()
 
     # Return the normalization object if requested
     if return_norm:
