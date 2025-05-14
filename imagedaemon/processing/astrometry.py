@@ -1,6 +1,7 @@
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,7 @@ def run_astrometry(
     scale_high: float = 1.2,
     downsample: int = 2,
     output_dir: PathLike | None = None,  # None, Path, or "tmp"
+    timeout: int = 30,
 ):
     """
     Call solve‑field and return an astropy.wcs.WCS built from the .new file.
@@ -95,10 +97,30 @@ def run_astrometry(
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            start_new_session=True,  # ← each child inherits the new pgid
         )
+        """
+        # realtime streaming of output
+        # works but doesn't handle any timeout
+        
         for line in proc.stdout:
             sys.stdout.write(line)
         proc.wait()
+        """
+        try:
+            out, _ = proc.communicate(timeout=timeout)
+            sys.stdout.write(out)
+        except subprocess.TimeoutExpired:
+            # terminate the whole process group (SIGTERM then SIGKILL fallback)
+            pgid = proc.pid  # leader’s pid == pgid because of start_new_session
+            os.killpg(pgid, signal.SIGTERM)
+            try:
+                proc.communicate(timeout=5)  # wait a moment for clean exit
+            except subprocess.TimeoutExpired:
+                os.killpg(pgid, signal.SIGKILL)
+                proc.communicate()
+            raise RuntimeError(f"solve‑field exceeded {timeout}s wall‑clock limit")
+        # still check exit status
         if proc.returncode:
             raise RuntimeError(f"solve-field failed (exit {proc.returncode})")
 

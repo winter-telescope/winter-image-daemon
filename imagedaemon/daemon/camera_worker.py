@@ -32,6 +32,7 @@ class CameraWorker(QtCore.QObject):
         background_image_list: list[str] = None,
         output_dir: str | None = None,
         pix_coords: tuple[int, int] | None = None,
+        timeout: int = 30,
         **astrometry_opts,
     ):
         """RPC call: solve astrometry for the specified image.
@@ -46,6 +47,8 @@ class CameraWorker(QtCore.QObject):
             science_image=science_image,
             addr=addr,
             background_image_list=background_image_list,
+            output_dir=output_dir,
+            timeout=timeout,
             **astrometry_opts,
         )
 
