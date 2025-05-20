@@ -150,8 +150,12 @@ class BasePipelines:
 
         # ------------------------------------------------------------------
         # 4. RA/Dec guess --------------------------------------------------
-        ra = astrometry_opts.pop("ra", None) or calibrated.header.get("RADEG")
-        dec = astrometry_opts.pop("dec", None) or calibrated.header.get("DECDEG")
+        ra = astrometry_opts.pop("ra", None) or self._get_radeg_from_header(
+            calibrated.header
+        )
+        dec = astrometry_opts.pop("dec", None) or self._get_decdeg_from_header(
+            calibrated.header
+        )
         if ra is None or dec is None:
             raise ValueError("Supply ra=<deg>, dec=<deg> or keep them in the header.")
 
@@ -399,8 +403,16 @@ class BasePipelines:
         median_data = calibration.median_combine(data_list)
 
         # subtract the dark
-        dark_img = self._load_dark(exptime, addr)
-        median_dark_sub_data = calibration.subtract_dark(median_data, dark_img.data)
+        try:
+            dark_img = self._load_dark(exptime, addr)
+            dark_data = dark_img.data
+        except Exception as e:
+            # if we can't load a dark, just use a zero array
+            dark_data = np.zeros_like(median_data)
+            log.warning(
+                "No dark frame available for %s, using zero array instead", addr
+            )
+        median_dark_sub_data = calibration.subtract_dark(median_data, dark_data)
 
         # normalize the flat to 1.0
         flat_data = calibration.normalize(median_dark_sub_data)
@@ -409,6 +421,19 @@ class BasePipelines:
         flat_img = Image(flat_data, header=images[0].header, mask=images[0].mask)
 
         return flat_img
+
+    # ----- astrometry helpers ---------------------------------------------
+    def _get_radeg_from_header(self, header) -> float:
+        """
+        Get the RA from the header.
+        """
+        return header["RADEG"]
+
+    def _get_decdeg_from_header(self, header) -> float:
+        """
+        Get the Dec from the header.
+        """
+        return header["DECDEG"]
 
     # ----- raw image loading ---------------------------------------------
     def _load_raw_image(self, path: str | Path, *, addr: str | None) -> Image:

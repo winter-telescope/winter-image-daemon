@@ -44,10 +44,10 @@ def flat_correct(data: np.ndarray, flat_data: np.ndarray) -> np.ndarray:
 
 def median_combine(data: List[np.ndarray] | np.ndarray) -> np.ndarray:
     # what is coming in?
-    print(f"data: {data}")
-    print(f"data type: {type(data)}")
-    print(f"type(data[0]): {type(data[0])}")
-    print(f"data[0].shape: {data[0].shape}")
+    # print(f"data: {data}")
+    # print(f"data type: {type(data)}")
+    # print(f"type(data[0]): {type(data[0])}")
+    # print(f"data[0].shape: {data[0].shape}")
     match data:
         case list():
             data = np.array(data)
@@ -57,10 +57,10 @@ def median_combine(data: List[np.ndarray] | np.ndarray) -> np.ndarray:
             raise TypeError("data must be a list or a numpy array")
 
     # median combine the data
-    print(f"data.shape: {data.shape}")
+    # print(f"data.shape: {data.shape}")
 
     median_data = np.nanmedian(data, axis=0)
-    print(f"median_data.shape: {median_data.shape}")
+    # print(f"median_data.shape: {median_data.shape}")
     return median_data
 
 

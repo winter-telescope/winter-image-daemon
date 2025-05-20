@@ -9,9 +9,9 @@ from imagedaemon.utils.paths import CAL_DATA_DIR, FOCUS_OUTPUT_DIR
 
 class SummerCCDMeta(BaseModel):
     name: str = "summer-ccd"
-    pixel_scale: float = 0.157
+    pixel_scale: float = 0.466
     scale_margin: float = 0.05
-    hot_pixel_threshold: int = 200
+    hot_pixel_threshold: int = 60000
 
     # calibration steps
     cal_steps: dict[str, bool] = {

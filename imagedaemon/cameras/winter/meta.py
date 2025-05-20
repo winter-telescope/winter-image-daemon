@@ -16,7 +16,7 @@ class WinterMeta(BaseModel):
     cal_steps: dict[str, bool] = {
         "dark": True,
         "lab_flat": False,
-        "dither_flat": True,
+        "dither_flat": False,
         "sky_flat": False,
         "remove_horizontal_stripes": True,
         "mask": True,
