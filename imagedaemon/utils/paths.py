@@ -54,5 +54,7 @@ OUTPUT_DIR = get_path(
     "OUTPUT_DIR", os.path.join(os.getenv("HOME"), "data", "image-daemon-data", "output")
 )
 
+FOCUS_OUTPUT_DIR = os.path.join(OUTPUT_DIR, "focus")
+
 print(f"astro_scamp = {astrom_scamp}")
 print(f"masterbias_dir = {MASTERBIAS_DIR}")

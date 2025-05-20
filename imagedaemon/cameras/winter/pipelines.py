@@ -100,7 +100,8 @@ class WinterPipelines(BasePipelines):
         log.debug("Loaded lab flat addr=%s", addr)
         return img
 
-    # ----- dither flat ----------------------------------------------
+    # ----- make (dither) flat ----------------------------------------------
+    """
     def _make_dither_flat(
         self,
         frames: List[str | Path],
@@ -122,3 +123,55 @@ class WinterPipelines(BasePipelines):
 
         # Wrap ndarray in Image (empty header is fine for flats)
         return Image(flat_data, header={})
+        """
+
+    def _make_flat(
+        self,
+        image_list: list[Image] | list[str | Path],
+        exptime: float,
+        addr: str | None,
+    ) -> Image:
+        if not image_list:
+            raise ValueError("No frames provided for flat construction")
+
+        # handle some different cases:
+        match image_list:
+            case [Image(), *_]:
+                images = image_list
+
+            case [str() | Path(), *_]:
+                # addr is required
+                if not addr:
+                    raise ValueError("Must supply addr for a list of paths")
+                images = [
+                    WinterImage(path).get_sensor_image(addr) for path in image_list
+                ]
+
+            case [WinterImage(), *_]:
+                # addr is required
+                if not addr:
+                    raise ValueError("Must supply addr a list of WinterImages")
+                images = [img.get_sensor_image(addr) for img in image_list]
+
+            case _:
+                raise ValueError(
+                    "Invalid image list: Must contain Image or WinterImage objects or paths."
+                )
+
+        # now we have a list of Image objects
+
+        # median combine the images
+        data_list = [im.data for im in images]
+        median_data = calibration.median_combine(data_list)
+
+        # subtract the dark
+        dark_img = self._load_dark(exptime, addr)
+        median_dark_sub_data = calibration.subtract_dark(median_data, dark_img.data)
+
+        # normalize the flat to 1.0
+        flat_data = calibration.normalize(median_dark_sub_data)
+
+        # create a new Image object with the flat data
+        flat_img = Image(flat_data, header=images[0].header, mask=images[0].mask)
+
+        return flat_img
