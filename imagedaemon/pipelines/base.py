@@ -35,88 +35,51 @@ class BasePipelines:
         science_image: str | Path,
         background_image_list: Sequence[str] | None = None,
         override_steps: dict[str, bool] | None = None,
-        **astrometry_opts,
-    ):
+        **_,
+    ) -> "Image":
         """
-        Calibrate *science_image* .
+        Apply the camera’s default calibration chain to *science_image*.
 
         Parameters
         ----------
         addr
-            Sub‑sensor identifier ('pa', 'pb', …) — ignored by cameras
-            that have only one sensor.
+            Sub‑sensor address for multi‑detector cameras (WINTER).
+            Ignored by single‑detector cameras.
         science_image
-            Path to the raw MEF or single‑ext FITS.
+            Raw MEF or single‑extension FITS file.
         background_image_list
-            Optional list of frames used to build a dither/sky flat.
+            Frames used to build a dither/sky flat (if that step is enabled).
         override_steps
-            Dict like {'lab_flat': False} to toggle individual steps.
-
+            Dict that toggles individual calibration steps
+            (e.g. ``{'dither_flat': False}``).
         """
         log.info(
-            "Calibration started | camera=%s image=%s", self.meta.name, science_image
+            "Calibration started | camera=%s image=%s",
+            self.meta.name,
+            science_image,
         )
 
+        # 1. decide which steps to perform
         steps = self._decide_steps(override_steps)
 
-        # -- 1. read science frame -----------------------------------------
+        # 2. load raw frame (may already select sensor if addr is given)
         img = self._load_raw_image(science_image, addr=addr)
-
         exptime = self._get_exptime(img)
+        log.debug("Loaded image   EXPTIME = %.2fs", exptime)
 
-        log.debug("Loaded image %s  exptime=%.2fs", science_image, exptime)
+        # 3. call the unified calibrator
+        data_cal = self._calibrate_data(
+            img.data.copy(),
+            mask=img.mask,
+            header=img.header,
+            addr=addr or "",
+            exptime=exptime,
+            steps=steps,
+            bkg_images=background_image_list,
+        )
 
-        data = img.data
-
-        if steps["mask"]:
-            data = calibration.apply_mask(data, img.mask)
-
-        """if steps["mask_hotpixels"]:
-            data = calibration.mask_hot_pixels(data, img.mask)"""
-
-        # -- 2. run requested calibration steps ----------------------------
-        if steps["dark"]:
-            log.debug("Applying master dark")
-            data = calibration.subtract_dark(
-                data, self._load_dark(exptime, addr=addr).data
-            )
-
-        if steps["lab_flat"]:
-            log.debug("Applying lab flat")
-            data = calibration.flat_correct(img, self._load_lab_flat(addr=addr).data)
-
-        if steps["dither_flat"]:
-            log.debug("Applying dither flat")
-            data = calibration.flat_correct(
-                data,
-                self._make_dither_flat(
-                    background_image_list or [], exptime=exptime, addr=addr
-                ).data,
-            )
-
-        if steps["sky_flat"]:
-            log.debug("Buiding and applying sky flat")
-            data = calibration.flat_correct(
-                data,
-                self._make_sky_flat(background_image_list or [], addr=addr).data,
-            )
-
-        if steps["mask_hot_pixels"]:
-            log.debug(f"Masking hot pixels > {self._hot_pixel_threshold()}")
-            data = calibration.mask_hot_pixels(
-                data, threshold=self._hot_pixel_threshold()
-            )
-
-        if steps["remove_horizontal_stripes"]:
-            log.debug("Removing horizontal stripes")
-            data = calibration.remove_horizontal_stripes(data, img.mask)
-
-        if steps["replace_nans_with_median"]:
-            log.debug("Replacing NaNs with median")
-            data = calibration.replace_nans_with_median(data)
-
-        # for now just return the calibrated Image
-        return Image(data, img.header)
+        # 4. return new Image instance
+        return Image(data_cal, img.header, mask=img.mask)
 
     def get_astrometric_solution(
         self,
@@ -206,6 +169,69 @@ class BasePipelines:
     #   HELPER METHODS  (meant to be overridden by camera subclasses)
     # ======================================================================
     # ----- calibration assets ---------------------------------------------
+
+    def _calibrate_data(
+        self,
+        data,
+        *,
+        mask,
+        header,
+        addr,
+        exptime,
+        steps,
+        bkg_images=None,  # list[str]|None
+        precomputed=None,  # optional dict of ready‑made flats
+    ):
+        """
+        Parameters
+        ----------
+        data, mask, header   numpy array + mask + FITS header
+        addr                 sensor address or '' for 1‑sensor cams
+        exptime              exposure time (sec)
+        steps                dict from _decide_steps()
+        bkg_images           focus‑loop list to build dither/sky flats
+        precomputed          {'dither_flat': ndarray, 'sky_flat': ndarray, …}
+        """
+        precomputed = precomputed or {}
+
+        if steps["mask"]:
+            data = calibration.apply_mask(data, mask)
+
+        if steps["dark"]:
+            data = calibration.subtract_dark(data, self._load_dark(exptime, addr).data)
+
+        if steps["lab_flat"]:
+            data = calibration.flat_correct(data, self._load_lab_flat(addr).data)
+
+        if steps["dither_flat"]:
+            flat = (
+                precomputed.get("dither_flat")
+                or self._make_dither_flat(
+                    bkg_images or [], exptime=exptime, addr=addr
+                ).data
+            )
+            data = calibration.flat_correct(data, flat)
+
+        if steps["sky_flat"]:
+            flat = (
+                precomputed.get("sky_flat")
+                or self._make_sky_flat(bkg_images or [], addr=addr).data
+            )
+            data = calibration.flat_correct(data, flat)
+
+        if steps["mask_hot_pixels"]:
+            data = calibration.mask_hot_pixels(
+                data, threshold=self._hot_pixel_threshold()
+            )
+
+        if steps["remove_horizontal_stripes"]:
+            data = calibration.remove_horizontal_stripes(data, mask)
+
+        if steps["replace_nans_with_median"]:
+            data = calibration.replace_nans_with_median(data)
+
+        return data
+
     def _get_exptime(self, img: Image) -> float:
         """
         Return the exposure time of the image.

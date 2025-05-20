@@ -22,6 +22,42 @@ class WinterPipelines(BasePipelines):
     the few helper methods Winter needs.
     """
 
+    # focus method
+    def calibrate_for_focus(self, images, *, addrs=None, out_dir=None, **opts):
+        steps = self._decide_steps(None)
+        out_dir = Path(out_dir or self.meta.focus_output_dir).expanduser()
+
+        # 1. group Image objects by ADDR
+        by_addr = {}
+        for im in images:
+            addr = im.header["ADDR"].lower()
+            by_addr.setdefault(addr, []).append(im)
+
+        calibrated = []
+        for addr, frames in by_addr.items():
+            exptime = frames[0].header["EXPTIME"]
+
+            # build once per sensor
+            pre = {}
+            if steps["dither_flat"]:
+                pre["dither_flat"] = self._make_dither_flat(
+                    [f.path for f in frames], exptime, addr
+                ).data
+
+            for im in frames:
+                data = self._calibrate_data(
+                    im.data.copy(),
+                    mask=im.mask,
+                    header=im.header,
+                    addr=addr,
+                    exptime=exptime,
+                    steps=steps,
+                    precomputed=pre,  # <‑‑ reuse the same flat
+                )
+                calibrated.append(Image(data, im.header, mask=im.mask))
+
+        return calibrated
+
     # ----- raw image loader with subsensor support -------------------
     def _load_raw_image(self, path: str | Path, *, addr: str | None) -> Image:
         path = Path(path)
