@@ -23,40 +23,6 @@ class WinterPipelines(BasePipelines):
     """
 
     # focus method
-    def calibrate_for_focus(self, images, *, addrs=None, out_dir=None, **opts):
-        steps = self._decide_steps(None)
-        out_dir = Path(out_dir or self.meta.focus_output_dir).expanduser()
-
-        # 1. group Image objects by ADDR
-        by_addr = {}
-        for im in images:
-            addr = im.header["ADDR"].lower()
-            by_addr.setdefault(addr, []).append(im)
-
-        calibrated = []
-        for addr, frames in by_addr.items():
-            exptime = frames[0].header["EXPTIME"]
-
-            # build once per sensor
-            pre = {}
-            if steps["dither_flat"]:
-                pre["dither_flat"] = self._make_dither_flat(
-                    [f.path for f in frames], exptime, addr
-                ).data
-
-            for im in frames:
-                data = self._calibrate_data(
-                    im.data.copy(),
-                    mask=im.mask,
-                    header=im.header,
-                    addr=addr,
-                    exptime=exptime,
-                    steps=steps,
-                    precomputed=pre,  # <‑‑ reuse the same flat
-                )
-                calibrated.append(Image(data, im.header, mask=im.mask))
-
-        return calibrated
 
     # ----- raw image loader with subsensor support -------------------
     def _load_raw_image(self, path: str | Path, *, addr: str | None) -> Image:
@@ -73,6 +39,31 @@ class WinterPipelines(BasePipelines):
         img = win_img.get_sensor_image(addr)
         log.debug("Loaded raw sensor %s from %s", addr, path.name)
         return img
+
+    def _load_focus_images(
+        self,
+        image_list: list[str | Path | Image],
+    ) -> dict:  # make a dictionary of sensor -> list of Image objects
+        images = [
+            WinterImage(path) if isinstance(path, str) else path for path in image_list
+        ]
+        if not images:
+            raise ValueError("No images to calibrate")
+        if len(images) < 4:
+            raise ValueError("Need at least 4 images to fit a best focus parabola")
+        addrs = WinterImage.get_addrs()
+
+        # instantiate a dict of empty lists for each addr
+        image_dict = {}
+        for addr in addrs:
+            image_dict[addr] = []
+
+        for image in images:
+            for addr in addrs:
+                image.get_sensor_image(addr)
+                image_dict[addr].append(image)
+
+        return image_dict
 
     # ----- calibration assets ---------------------------------------
     def _load_dark(self, exptime: float, addr: str | None) -> Image:

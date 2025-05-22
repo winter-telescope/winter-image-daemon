@@ -7,10 +7,14 @@ from tempfile import TemporaryDirectory
 from typing import Iterable, Sequence
 
 import numpy as np
+from matplotlib import pyplot as plt
 
 from imagedaemon.processing import astrometry, calibration
 from imagedaemon.processing.calibration import CalibrationError
+from imagedaemon.processing.focus import fit_parabola, parabola
+from imagedaemon.processing.sextractor import get_img_fwhm
 from imagedaemon.utils.image import Image  # thin wrapper around FITS/WCS
+from imagedaemon.utils.serialization import sanitize_for_serialization
 
 log = logging.getLogger("imagedaemon.pipeline")
 
@@ -177,9 +181,11 @@ class BasePipelines:
     def calibrate_for_focus(
         self,
         image_paths: list[str | Path],
+        addrs: list[str] | None = None,
+        override_steps: dict[str, bool] | None = None,
         out_dir: str | Path | None = None,
         **opts,
-    ) -> list["Image"]:
+    ) -> dict[str, list[str]]:
         """
         Calibrate a *list* of raw `Image` objects for a focus loop.
 
@@ -194,74 +200,434 @@ class BasePipelines:
         group frames by sensor address and call
         `_calibrate_data()` separately per sensor.
         """
-        # make a list of Image objects
-        images = [
-            Image(path) if isinstance(path, str) else path for path in image_paths
-        ]
-        if not images:
+        # load in the data as a dictionary of sensor -> list of Image objects
+        image_dict = self._load_focus_images(image_paths)
+        if not image_dict:
             raise ValueError("No images to calibrate")
-        if len(images) < 4:
-            raise ValueError("Need at least 4 images to fit a best focus parabola")
-        steps = self._decide_steps(None)
-        exptime = self._get_exptime(images[0])
 
-        # ---------- build once‑per‑dataset reference dither flat --------------
-        precomputed: dict[str, np.ndarray] = {}
-        if steps["dither_flat"]:
-            precomputed["dither_flat"] = self._make_dither_flat(
-                [im.path for im in images],
-                exptime=exptime,
-                addr="",
-            ).data
+        print("image_dict", image_dict)
+
+        steps = self._decide_steps(None)
+
+        # use the first image from the first sensor to get the exptime
+        first_key = list(image_dict.keys())[0]
+        exptime = self._get_exptime(image_dict[first_key][0])
+        log.debug("Loaded image   EXPTIME = %.2fs", exptime)
 
         # ---------- calibrate every frame -------------------------------
-        calibrated: list["Image"] = []
-        for im in images:
-            data_cal = self._calibrate_data(
-                im.data.copy(),
-                mask=im.mask,
-                header=im.header,
-                addr="",  # single‑sensor camera
-                exptime=exptime,
-                steps=steps,
-                precomputed=precomputed,
-            )
-            calibrated.append(Image(data_cal, im.header, mask=im.mask))
+        if addrs is None:
+            addrs = [""]
+        calibrated_images_dict = {}
+        for addr in addrs:
+            images = image_dict[addr]
+            # build once per sensor
+            precomputed = {}
+            if steps["dither_flat"]:
+                precomputed["dither_flat"] = self._make_flat(
+                    [im.path for im in images],
+                    exptime=exptime,
+                    addr=addr,
+                ).data
 
-        return calibrated
+            # ---------- calibrate every frame -------------------------------
+
+            calibrated_filepaths = []
+            for im in images:
+                data_cal = self._calibrate_data(
+                    im.data.copy(),
+                    mask=im.mask,
+                    header=im.header,
+                    addr="",  # single‑sensor camera
+                    exptime=exptime,
+                    steps=steps,
+                    precomputed=precomputed,
+                )
+
+                calibrated_image = Image(data_cal, im.header, mask=im.mask)
+                # save the calibrated image to the output directory, replace ".fits" with ".cal.fits"
+                if out_dir:
+                    out_dir = Path(out_dir).expanduser()
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    filepath = Path(im.filename)
+                    print(f"input filepath: {filepath}")
+                    cal_path = out_dir / (filepath.with_suffix(".cal.fits"))
+                    print(f"calibrated output filepath: {cal_path}")
+                    calibrated_image.save_image(cal_path)
+                    log.debug("Calibrated FITS written to %s", cal_path)
+                calibrated_filepaths.append(cal_path)
+
+            calibrated_images_dict[addr] = calibrated_filepaths
+
+        return calibrated_images_dict
+
+    '''
+    def measure_fwhm_of_calibrated_images(
+        self,
+        calibrated_images_dict: dict[str, list[str]],
+        addrs: list[str] | None = None,
+        override_steps: dict[str, bool] | None = None,
+        out_dir: str | Path | None = None,
+        focus_positions: list[float] | None = None,
+        **kwargs,
+    ) -> dict[str, list[str]]:
+        """
+        Take in the dictionary of calibrated images and measure the FWHM of each image,
+        organized by sensor address, and return a dictionary of the per-sensor FWHM values,
+        and the median across all specified sensors in the addrs list.
+        """
+        # instantiate a dictionary to hold the FWHM results
+        fwhm_results_dict = {"median": {}, "sensors": {}}
+        for sensor in calibrated_images_dict:
+            image_paths = calibrated_images_dict[sensor]
+            if not image_paths:
+                raise ValueError(f"No images to calibrate for sensor {sensor}")
+
+            # if no focus positions are provided, grab them from the images
+            # this should only execute on the first sensor in the list,
+            # which implicitly assumes that all sensors have the same focus positions.
+            if focus_positions is None:
+                focus_positions = [
+                    self._get_focus_position(Image(path)) for path in image_paths
+                ]
+                # add the focus positions to the results dictionary
+                fwhm_results_dict.update({"focus_positions": focus_positions})
+
+            # Measure FWHM for each image in the list
+            fwhm_results = self.measure_fwhm(
+                image_paths=image_paths,
+                override_steps=override_steps,
+                out_dir=out_dir,
+                **kwargs,
+            )
+
+            # Store the results in a dictionary
+            fwhm_results_dict.update({sensor: fwhm_results})
+
+        # median results across all SELECTED sensors at each focus position
+        fwhm_median_combined = []
+        fwhm_mean_combined = []
+        fwhm_std_combined = []
+        for addr in fwhm_results_dict:
+            # add an entry to the results dict:
+            if (addr in addrs) or (addrs is None):
+                fwhm_median_combined.append(
+                    fwhm_results_dict["sensors"][addr]["fwhm_median"]
+                )
+                fwhm_mean_combined.append(
+                    fwhm_results_dict["sensors"][addr]["fwhm_mean"]
+                )
+                fwhm_std_combined.append(fwhm_results_dict["sensors"][addr]["fwhm_std"])
+
+        # add the median results to the dictionary
+        fwhm_median_combined = np.array(fwhm_median_combined)
+        fwhm_mean_combined = np.array(fwhm_mean_combined)
+        fwhm_std_combined = np.array(fwhm_std_combined)
+
+        fwhm_median_medians = np.nanmedian(fwhm_median_combined, axis=0)
+        fwhm_mean_medians = np.nanmedian(fwhm_mean_combined, axis=0)
+        fwhm_std_medians = np.nanmedian(fwhm_std_combined, axis=0)
+
+        # add the median results to the dictionary
+        fwhm_results_dict.update(
+            {
+                "median": {
+                    "fwhm_median": fwhm_median_medians,
+                    "fwhm_mean": fwhm_mean_medians,
+                    "fwhm_std": fwhm_std_medians,
+                }
+            }
+        )
+
+        # clean up the results dictionary so that it only contains native python types and
+        # that the results are lists not np arrays. this is important for pyro serialization
+        fwhm_results_dict = sanitize_for_serialization(fwhm_results_dict)
+        return fwhm_results_dict
+        '''
+
+    def measure_fwhm_of_calibrated_images(
+        self,
+        calibrated_images_dict: dict[str, list[str]],
+        addrs: list[str] | None = None,
+        override_steps: dict[str, bool] | None = None,
+        out_dir: str | Path | None = None,
+        focus_positions: list[float] | None = None,
+        **kwargs,
+    ) -> dict:
+        """
+        Take in a dict mapping sensor → [calibrated FITS paths], measure FWHM,
+        and return
+        {
+            "focus_positions": [ … ],
+            "sensors": {
+            "sa": {"fwhm_median":[…],"fwhm_mean":[…],"fwhm_std":[…]},
+            "sb": {…}, …
+            },
+            "median": {
+            "fwhm_median":[…],  # median across SELECTED sensors
+            "fwhm_mean":[…],
+            "fwhm_std":[…],
+            }
+        }
+
+        If `addrs` is provided, only those sensors go into the `"median"` block
+        (but *all* sensors are still reported under `"sensors"`).  In the
+        single-detector case it will strip out the `"sensors"` block entirely.
+        """
+
+        results: dict = {}
+        # 1) determine focus positions (once)
+        if focus_positions is None:
+            # pick the first non-empty sensor to read FOCPOS
+            for sensor, paths in calibrated_images_dict.items():
+                if paths:
+                    focus_positions = [
+                        self._get_focus_position(Image(p)) for p in paths
+                    ]
+                    break
+            else:
+                raise ValueError("No calibrated images provided")
+        results["focus_positions"] = list(focus_positions)
+
+        # 2) per‐sensor FWHM
+        sensors_block: dict[str, dict] = {}
+        for sensor, paths in calibrated_images_dict.items():
+            if not paths:
+                raise ValueError(f"No calibrated images for sensor {sensor!r}")
+            fwhm_res = self.measure_fwhm(
+                image_paths=paths,
+                override_steps=override_steps,
+                out_dir=out_dir,
+                **kwargs,
+            )
+            # fwhm_res is {"fwhm_median":[…],"fwhm_mean":[…],"fwhm_std":[…]}
+            sensors_block[sensor] = fwhm_res
+
+        # if single‐detector (only one key, typically "") then we omit the block
+        if len(sensors_block) == 1 and list(sensors_block.keys())[0] in ("", None):
+            # collapse to just the median
+            single = sensors_block[list(sensors_block.keys())[0]]
+            results["median"] = {
+                "fwhm_median": single["fwhm_median"],
+                "fwhm_mean": single["fwhm_mean"],
+                "fwhm_std": single["fwhm_std"],
+            }
+            results["sensors"] = {}
+            return sanitize_for_serialization(results)
+
+        # otherwise keep all sensors
+        results["sensors"] = sensors_block
+
+        # 3) build combined median across the selected subset
+        if addrs is None:
+            selected = list(sensors_block.keys())
+        else:
+            # filter out any that aren’t present
+            selected = [s for s in addrs if s in sensors_block]
+            if not selected:
+                raise ValueError(f"None of the requested sensors {addrs} present")
+
+        # stack into arrays, shape = (n_sel, n_focus)
+        med_stack = np.vstack([sensors_block[s]["fwhm_median"] for s in selected])
+        mean_stack = np.vstack([sensors_block[s]["fwhm_mean"] for s in selected])
+        std_stack = np.vstack([sensors_block[s]["fwhm_std"] for s in selected])
+
+        results["median"] = {
+            "fwhm_median": np.nanmedian(med_stack, axis=0).tolist(),
+            "fwhm_mean": np.nanmedian(mean_stack, axis=0).tolist(),
+            "fwhm_std": np.nanmedian(std_stack, axis=0).tolist(),
+        }
+
+        return sanitize_for_serialization(results)
 
     def measure_fwhm(
         self,
-        image_list: Sequence[str | Path],  # list of raw image file names or paths
+        image_paths: (
+            Sequence[str | Path] | str | Path
+        ),  # list of raw image file names or paths
         focus_positions: Sequence[float] | None = None,  # list of focus positions
-        addrs: (
-            Sequence[str] | None
-        ) = None,  # list of sensor addresses to use in the focus calculation
         override_steps: dict[str, bool] | None = None,
         focus_position_header_key: str = "FOCPOS",
+        addr: str | None = None,
         **kwargs,
     ) -> dict:
         """
         Measure the FWHM of the images in *image_list*.
-        Optionally, the focus positions can be provided to override
-        the FWHM with the focus position, but it will otherwise
-        try to find the focus_position_header_key in the header and just use that.
 
-        for winter cameras, the addrs parameter can be used to specify
-        which sensors to use in the focus calculation. If None, just assumes one sensor.
+        expects a list of images filenames/path objects which point to images
+        which are already calibrated. It will then run sextractor on the images
+        and return a dictionary:
 
-        for winter, returns something like:
-            {
-            "pa": (focus_vals, fwhm_median, fwhm_std),
-            "pb": (...),
-                ...
+        results = {"fwhm_median" : fwhm_median_list, "fwhm_mean": fwhm_mean_list, "fwhm_std" : fwhm_std_list}
+        """
+        # if it's a single image, make it a list
+        if isinstance(image_paths, (str, Path)):
+            image_paths = [image_paths]
+
+        fwhm_mean = []
+        fwhm_median = []
+        fwhm_std = []
+
+        # step 0: loop through the images
+        for image_path in image_paths:
+
+            # step 1 make sure there is a weight image for the sensor, and make it if not
+            if not self._weight_image_exists(addr):
+                # make the weight image
+                img = Image(image_path)
+                weight_image_path = img.save_mask_image(
+                    filename=self.meta.weight_file_path(addr)
+                )
+                log.debug("Weight image generated for sensor %s", addr)
+
+            # step 2: run sextractor on the saved calibrated images, or just pull
+            # the results from existing tables
+            mean, median, std = get_img_fwhm(
+                image_path,
+                pixscale=self.meta.pixel_scale,
+                weightimg=self.meta.weight_file_path(addr),
+                xlolim=10,
+                xuplim=2000,
+                ylolim=10,
+                yuplim=2000,
+                exclude=False,
+            )
+            # step 3: add the results to the lists
+            fwhm_mean.append(mean)
+            fwhm_median.append(median)
+            fwhm_std.append(std)
+
+        # step 4: return a dictionary with the fwhm and fwhm_std lists
+        results = {
+            "fwhm_median": fwhm_median,
+            "fwhm_mean": fwhm_mean,
+            "fwhm_std": fwhm_std,
+        }
+
+        return results
+
+    # focus loop orchestrator
+    # ------------ orchestrator --------------------------------------------
+
+    def run_focus_loop(self, image_list, *, addrs=None, output_dir=None, **opts):
+        """
+        Generic driver – *pipeline* is a {Winter,Qcmos,…}Pipelines instance.
+
+        Parameters
+        ----------
+        image_list   list[str]       raw images belonging to one focus sweep
+        addrs        list[str]|None  subset of sensors (WINTER) or None
+        output_dir   str|Path|None   where to drop plots & intermediates
+        """
+        outdir = Path(output_dir or self.meta.focus_output_dir).expanduser()
+        outdir.mkdir(parents=True, exist_ok=True)
+
+        # ------------------------------------------------------------------
+        # 1. load & quick‑calibrate
+        # ------------------------------------------------------------------
+        calibrated_images_dict = self.calibrate_for_focus(
+            image_list, out_dir=outdir, **opts
+        )
+
+        # ------------------------------------------------------------------
+        # 2. measure FWHM   ->  dict {addr: (focus, med, std)}
+        # ------------------------------------------------------------------
+        fwhm_dict = self.measure_fwhm_of_calibrated_images(
+            calibrated_images_dict, addrs=addrs, **opts
+        )
+        """
+        Example:
+        fwhm_dict = {
+                    "median": {
+                        "fwhm_median": fwhm_median_medians,
+                        "fwhm_mean": fwhm_mean_medians,
+                        "fwhm_std": fwhm_std_medians,
+                    },
+                    "focus_positions": focus_positions,
+                    "sensors": {
+                        "pa": {
+                            "fwhm_median": fwhm_median_pa,
+                            "fwhm_mean": fwhm_mean_pa,
+                            "fwhm_std": fwhm_std_pa,
+                        },
+                        ...
+                    },
+                }
+        """
+        # ------------------------------------------------------------------
+        # 3. fit each sensor separately  +  plot
+        # ------------------------------------------------------------------
+        focus_positions = np.asarray(fwhm_dict["focus_positions"])
+        sensors_dict = fwhm_dict["sensors"]  # {'pa': {...}, 'pb': {...}, …}
+
+        n_panels = len(sensors_dict) + 1  # +1 for the global view
+        fig, axes = plt.subplots(
+            nrows=n_panels,
+            ncols=1,
+            figsize=(6, 3 * n_panels),
+            sharex=True,
+        )
+
+        # Matplotlib quirk: when nrows == 1, axes is a single Axes object
+        if not isinstance(axes, (list, np.ndarray)):
+            axes = [axes]
+
+        per_sensor = {}
+
+        # ---------- per‑sensor fits ----------
+        for ax, (addr, vals) in zip(axes[:-1], sensors_dict.items()):
+            med = np.asarray(vals["fwhm_median"])
+            std = np.asarray(vals["fwhm_std"])
+            foc = focus_positions
+
+            popt = fit_parabola(foc, med, std)  # [best_focus, a, b] etc.
+            xgrid = np.linspace(foc.min(), foc.max(), 200)
+
+            ax.errorbar(foc, med, yerr=std, fmt="o", label=f"{addr}")
+            ax.plot(xgrid, parabola(xgrid, *popt), label=f"best = {popt[0]:.1f}")
+            ax.set_ylabel("FWHM [arcsec]")
+            ax.legend(frameon=False, loc="upper center", ncols=2)
+
+            per_sensor[addr] = {
+                "best_focus": float(popt[0]),
+                "focus": foc.tolist(),
+                "fwhm_median": med.tolist(),
+                "fwhm_std": std.tolist(),
             }
 
-        for other cameras, returns something like:
-            {"": (focus_vals, med, std)}
+        # ------------------------------------------------------------------
+        # 4. global (stacked) fit  +  plot
+        # ------------------------------------------------------------------
+        global_med = np.asarray(fwhm_dict["median"]["fwhm_median"])
+        global_std = np.asarray(fwhm_dict["median"]["fwhm_std"])
 
-        """
-        return {}
+        p_global = fit_parabola(focus_positions, global_med, global_std)
+
+        ax_global = axes[-1]  # last panel
+        xgrid = np.linspace(focus_positions.min(), focus_positions.max(), 200)
+
+        ax_global.errorbar(
+            focus_positions, global_med, yerr=global_std, fmt="o", label="all sensors"
+        )
+        ax_global.plot(
+            xgrid, parabola(xgrid, *p_global), label=f"global best = {p_global[0]:.1f}"
+        )
+        ax_global.set_ylabel("FWHM [arcsec]")
+        ax_global.set_xlabel("FOCPOS")
+        ax_global.legend(frameon=False, loc="upper center", ncols=2)
+
+        plt.suptitle(f"Focus loop – global best = {p_global[0]:.1f}")
+
+        plot_path = outdir / "focusloop_all_sensors.png"
+        plt.savefig(plot_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+        # ------------------------------------------------------------------
+        return {
+            "best_focus": float(p_global[0]),
+            "per_sensor": per_sensor,
+            "plot": str(plot_path),
+            "results": fwhm_dict,
+        }
 
     # ======================================================================
     #   HELPER METHODS  (meant to be overridden by camera subclasses)
@@ -344,6 +710,30 @@ class BasePipelines:
             data = calibration.replace_nans_with_median(data)
 
         return data
+
+    def _weight_image_exists(self, addr: str | None) -> bool:
+        """
+        Check if a weight image exists for the given sensor address.
+
+        Default: no weight image.
+        """
+        # the weight image path is stored in the camera meta
+        weight_image_path = self.meta.weight_file_path(addr)
+        if Path(weight_image_path).exists():
+            return True
+        else:
+            log.warning("No weight image found for sensor %s", addr)
+            # if no weight image is found, return False
+            # this will be overridden in the camera subclass
+        return False
+
+    def _get_focus_position(self, img: Image) -> float:
+        """
+        Return the focus position of the image.
+
+        Default: read from the header.
+        """
+        return img.header["FOCPOS"]
 
     def _get_exptime(self, img: Image) -> float:
         """
@@ -436,9 +826,23 @@ class BasePipelines:
         return header["DECDEG"]
 
     # ----- raw image loading ---------------------------------------------
-    def _load_raw_image(self, path: str | Path, *, addr: str | None) -> Image:
+    def _load_raw_image(
+        self, path: str | Path, *, addr: list[str] | str | None
+    ) -> Image:
         """Default: just read the FITS; no sensor selection."""
         return Image(path)
+
+    def _load_focus_images(
+        self,
+        image_list: list[str | Path | Image],
+    ) -> dict:  # make a list of Image objects
+        images = [Image(path) if isinstance(path, str) else path for path in image_list]
+        if not images:
+            raise ValueError("No images to calibrate")
+        if len(images) < 4:
+            raise ValueError("Need at least 4 images to fit a best focus parabola")
+        image_dict = {"": images}
+        return image_dict
 
     # ----- internal ------------------------------------------------------
     def _scale_bounds(self, overrides: dict) -> tuple[float, float]:

@@ -11,6 +11,8 @@ from astropy.stats import sigma_clipped_stats
 from astropy.visualization import ImageNormalize, SqrtStretch, ZScaleInterval
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
+from imagedaemon.utils.mask import mask_datasec
+
 
 class Image:
     "Class to hold an image and its header, and provide basic plotting/saving functions"
@@ -48,6 +50,10 @@ class Image:
                 self.mask = mask
             case None:
                 self.mask = np.zeros_like(self.data, dtype=bool)
+
+        # no matter what, let's mask the datasec region
+        datasec_mask = mask_datasec(self.data, self.header, fill_value=1)
+        self.mask = np.logical_or(self.mask, datasec_mask)
 
     def load_image(self, filepath: str | Path) -> None:
         """
@@ -123,6 +129,32 @@ class Image:
 
         # 3. write the file
         hdu = fits.PrimaryHDU(self.data, header=self.header)
+        hdu.writeto(fspath(filename), overwrite=overwrite)
+
+    def save_mask_image(self, filename: str | Path, overwrite: bool = True) -> None:
+        """
+        Write the mask to a FITS file.
+
+        Parameters
+        ----------
+        filename : str | Path
+            Destination file path. If missing the ``.fits`` suffix it will
+            be added automatically.
+        overwrite : bool
+            Forwarded to ``astropy.io.fits.writeto``.
+        """
+        # 1. normalise to Path object
+        filename = Path(filename).with_suffix(".fits")
+
+        # 2. ensure parent directory exists (skip if `.` / current dir)
+        if filename.parent != Path():
+            filename.parent.mkdir(parents=True, exist_ok=True)
+
+        # 3. write the file
+        # convert the mask to 1s and 0s instead of True and False
+        mask_image_data = np.zeros_like(self.mask, dtype=np.uint8)
+        mask_image_data[self.mask] = 1
+        hdu = fits.PrimaryHDU(mask_image_data, header=self.header)
         hdu.writeto(fspath(filename), overwrite=overwrite)
 
 

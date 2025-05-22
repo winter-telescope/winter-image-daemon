@@ -1,13 +1,9 @@
 # qCMOS camera definition
 
-from pathlib import Path
-
-from pydantic import BaseModel
-
-from imagedaemon.utils.paths import CAL_DATA_DIR, FOCUS_OUTPUT_DIR
+from imagedaemon.meta.base import BaseMeta
 
 
-class QcmosMeta(BaseModel):
+class QcmosMeta(BaseMeta):
     name: str = "qcmos"
     pixel_scale: float = 0.157
     scale_margin: float = 0.05
@@ -36,8 +32,3 @@ class QcmosMeta(BaseModel):
         "mask_hot_pixels": False,
         "replace_nans_with_median": True,
     }
-    focus_output_dir: Path = Path(FOCUS_OUTPUT_DIR, "qcmos")
-
-    # reference‑frame paths
-    dark_dir: Path = Path(CAL_DATA_DIR, "qcmos", "masterdarks")
-    lab_flat_file: Path = Path(CAL_DATA_DIR, "qcmos", "masterflats", "masterflat.fits")

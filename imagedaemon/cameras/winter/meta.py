@@ -1,11 +1,7 @@
-from pathlib import Path
-
-from pydantic import BaseModel
-
-from imagedaemon.utils.paths import CAL_DATA_DIR, FOCUS_OUTPUT_DIR
+from imagedaemon.meta.base import BaseMeta
 
 
-class WinterMeta(BaseModel):
+class WinterMeta(BaseMeta):
     name: str = "winter"
     pixel_scale: float = 1.12
     scale_margin: float = 0.05
@@ -36,8 +32,3 @@ class WinterMeta(BaseModel):
         "mask_hot_pixels": True,
         "replace_nans_with_median": True,
     }
-    focus_output_dir: Path = Path(FOCUS_OUTPUT_DIR, "winter")
-
-    # reference‑frame paths
-    dark_dir: Path = Path(CAL_DATA_DIR, "winter", "masterdarks")
-    lab_flat_file: Path = Path(CAL_DATA_DIR, "winter", "masterflats", "masterflat.fits")

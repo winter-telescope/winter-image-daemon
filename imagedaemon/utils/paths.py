@@ -28,7 +28,7 @@ def get_path(name: str, default: str | Path | None = None) -> Path:
     return Path(value).expanduser().resolve()
 
 
-CONFIG_DIR = get_path("CONFIG_DIR", Path(PROJECT_ROOT, "imagedaemon", "config"))
+CONFIG_DIR = get_path("CONFIG_DIR", Path(PROJECT_ROOT, "config"))
 print(f"PROJECT_ROOT = {PROJECT_ROOT}")
 print(f"CONFIG_DIR = {CONFIG_DIR}")
 
@@ -42,19 +42,20 @@ MASTERBIAS_DIR = get_path("BIAS_DIR", os.path.join(CAL_DATA_DIR, "masterbias"))
 MASTERFLAT_DIR = get_path("FLAT_DIR", os.path.join(CAL_DATA_DIR, "masterflats"))
 MASTERDARK_DIR = get_path("DARK_DIR", os.path.join(CAL_DATA_DIR, "masterdarks"))
 
-astrom_scamp = CONFIG_DIR.joinpath("scamp.conf")
-astrom_sex = CONFIG_DIR.joinpath("astrom.sex")
-astrom_param = CONFIG_DIR.joinpath("astrom.param")
-astrom_filter = CONFIG_DIR.joinpath("default.conv")
-astrom_swarp = CONFIG_DIR.joinpath("config.swarp")
-astrom_nnw = CONFIG_DIR.joinpath("default.nnw")
-photom_sex = CONFIG_DIR.joinpath("photomCat.sex")
+# Paths to the SExtractor configuration files
+SEXTRACTOR_SEX_FILE = get_path("SEXTRACTOR_SEX_FILE", CONFIG_DIR.joinpath("astrom.sex"))
+SEXTRACTOR_PARAM_FILE = get_path(
+    "SEXTRACTOR_PARAM_FILE", CONFIG_DIR.joinpath("astrom.param")
+)
+SEXTRACTOR_CONV_FILE = get_path(
+    "SEXTRACTOR_PARAM_FILE", CONFIG_DIR.joinpath("default.conv")
+)
+SEXTRACTOR_NNW_FILE = get_path(
+    "SEXTRACTOR_PARAM_FILE", CONFIG_DIR.joinpath("default.nnw")
+)
 
 OUTPUT_DIR = get_path(
     "OUTPUT_DIR", os.path.join(os.getenv("HOME"), "data", "image-daemon-data", "output")
 )
 
 FOCUS_OUTPUT_DIR = os.path.join(OUTPUT_DIR, "focus")
-
-print(f"astro_scamp = {astrom_scamp}")
-print(f"masterbias_dir = {MASTERBIAS_DIR}")

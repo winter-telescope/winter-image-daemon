@@ -1,13 +1,9 @@
 # qCMOS camera definition
 
-from pathlib import Path
-
-from pydantic import BaseModel
-
-from imagedaemon.utils.paths import CAL_DATA_DIR, FOCUS_OUTPUT_DIR
+from imagedaemon.meta.base import BaseMeta
 
 
-class SummerCCDMeta(BaseModel):
+class SummerCCDMeta(BaseMeta):
     name: str = "summer-ccd"
     pixel_scale: float = 0.466
     scale_margin: float = 0.05
@@ -37,10 +33,3 @@ class SummerCCDMeta(BaseModel):
         "mask_hot_pixels": False,
         "replace_nans_with_median": True,
     }
-    focus_output_dir: Path = Path(FOCUS_OUTPUT_DIR, "summer-ccd")
-
-    # reference‑frame paths
-    dark_dir: Path = Path(CAL_DATA_DIR, "summer-ccd", "masterdarks")
-    lab_flat_file: Path = Path(
-        CAL_DATA_DIR, "summer-ccd", "masterflats", "masterflat.fits"
-    )
