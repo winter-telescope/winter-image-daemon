@@ -9,6 +9,9 @@ import numpy.typing as npt
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 from astropy.visualization import ImageNormalize, SqrtStretch, ZScaleInterval
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+from imagedaemon.utils.mask import mask_datasec
 
 
 class Image:
@@ -47,6 +50,10 @@ class Image:
                 self.mask = mask
             case None:
                 self.mask = np.zeros_like(self.data, dtype=bool)
+
+        # no matter what, let's mask the datasec region
+        # datasec_mask = mask_datasec(self.data, self.header, fill_value=1)
+        # self.mask = np.logical_or(self.mask, datasec_mask)
 
     def load_image(self, filepath: str | Path) -> None:
         """
@@ -90,7 +97,7 @@ class Image:
             mask = self.mask
         else:
             mask = None
-        plot_image(
+        ax = plot_image(
             self.data,
             title=title,
             cbar=cbar,
@@ -99,6 +106,7 @@ class Image:
             mask=mask,
             **kwargs,
         )
+        return ax
 
     def save_image(self, filename: str | Path, overwrite: bool = True) -> None:
         """
@@ -121,6 +129,60 @@ class Image:
 
         # 3. write the file
         hdu = fits.PrimaryHDU(self.data, header=self.header)
+        hdu.writeto(fspath(filename), overwrite=overwrite)
+
+    def save_mask_image(self, filename: str | Path, overwrite: bool = True) -> None:
+        """
+        Write the mask to a FITS file.
+
+        Parameters
+        ----------
+        filename : str | Path
+            Destination file path. If missing the ``.fits`` suffix it will
+            be added automatically.
+        overwrite : bool
+            Forwarded to ``astropy.io.fits.writeto``.
+        """
+        # 1. normalise to Path object
+        filename = Path(filename).with_suffix(".fits")
+
+        # 2. ensure parent directory exists (skip if `.` / current dir)
+        if filename.parent != Path():
+            filename.parent.mkdir(parents=True, exist_ok=True)
+
+        # 3. write the file
+        # convert the mask to 1s and 0s instead of True and False
+        mask_image_data = np.zeros_like(self.mask, dtype=np.uint8)
+        mask_image_data[self.mask] = 1
+        hdu = fits.PrimaryHDU(mask_image_data, header=self.header)
+        hdu.writeto(fspath(filename), overwrite=overwrite)
+
+    def save_weight_image(self, filename: str | Path, overwrite: bool = True) -> None:
+        """
+        Write the weight image to a FITS file.
+
+        Parameters
+        ----------
+        filename : str | Path
+            Destination file path. If missing the ``.fits`` suffix it will
+            be added automatically.
+        overwrite : bool
+            Forwarded to ``astropy.io.fits.writeto``.
+        """
+        # 1. normalise to Path object
+        filename = Path(filename).with_suffix(".fits")
+
+        # 2. ensure parent directory exists (skip if `.` / current dir)
+        if filename.parent != Path():
+            filename.parent.mkdir(parents=True, exist_ok=True)
+
+        # 3. write the file
+        # convert the mask to 1s and 0s instead of True and False
+        # note that this is the inverse of the mask
+        # so that the weight image is 1 where the mask is 0
+        mask_image_data = np.ones_like(self.mask, dtype=np.uint8)
+        mask_image_data[self.mask] = 0
+        hdu = fits.PrimaryHDU(mask_image_data, header=self.header)
         hdu.writeto(fspath(filename), overwrite=overwrite)
 
 
@@ -152,6 +214,7 @@ def plot_image(
     mask=None,
     title=None,
     cbar=False,
+    figsize=(6, 6),
     **kwargs: Any,
 ):
     """
@@ -189,7 +252,7 @@ def plot_image(
     """
     # Create ax if not provided
     if ax is None:
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=figsize)
 
     # Handle default window boundaries
     if x_min is None:
@@ -248,12 +311,16 @@ def plot_image(
             norm=norm,
             **kwargs,
         )
-
-    cbar = plt.colorbar(im, ax=ax)
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    plt.colorbar(im, cax=cax)  # Similar to fig.colorbar(im, cax = cax)
+    # cbar = plt.colorbar(im, ax=ax)
 
     # Set the title if provided
     if title is not None:
         ax.set_title(title)
+
+    plt.tight_layout()
 
     # Return the normalization object if requested
     if return_norm:

@@ -551,7 +551,8 @@ class WinterImage:
 
         if board_id == 6:
             # Mask channel 0
-            mask[0::2, 0::4] = 1.0
+            i = 0
+            mask[i::2, i::4] = 1.0
 
             # mask the top edge
             mask[:50, :] = 1.0

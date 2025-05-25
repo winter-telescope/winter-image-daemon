@@ -35,6 +35,9 @@ dependencies = [
 
 ]
 
+[project.scripts]
+imagedaemon-daemon = "imagedaemon.daemon.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "ruff",

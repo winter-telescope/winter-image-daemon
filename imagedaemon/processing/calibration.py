@@ -7,6 +7,7 @@
 from typing import List, Optional
 
 import numpy as np
+from scipy.ndimage import generic_filter
 
 
 class CalibrationError(Exception):
@@ -42,7 +43,146 @@ def flat_correct(data: np.ndarray, flat_data: np.ndarray) -> np.ndarray:
     return data / flat_data
 
 
-def build_dither_flat(
+def median_combine(data: List[np.ndarray] | np.ndarray) -> np.ndarray:
+    # what is coming in?
+    # print(f"data: {data}")
+    # print(f"data type: {type(data)}")
+    # print(f"type(data[0]): {type(data[0])}")
+    # print(f"data[0].shape: {data[0].shape}")
+    match data:
+        case list():
+            data = np.array(data)
+        case np.ndarray():
+            pass
+        case _:
+            raise TypeError("data must be a list or a numpy array")
+
+    # median combine the data
+    # print(f"data.shape: {data.shape}")
+
+    median_data = np.nanmedian(data, axis=0)
+    # print(f"median_data.shape: {median_data.shape}")
+    return median_data
+
+
+def normalize(data: np.ndarray) -> np.ndarray:
+    """
+    Normalize an image
+
+    :param image: image to normalize
+    :return: normalized image
+    """
+    # normalize the data
+    data = data / np.nanmedian(data)
+    return data
+
+
+def apply_mask(
+    data: np.ndarray, mask: Optional[np.ndarray] = None, fill_value=np.nan
+) -> np.ndarray:
+    """
+    Apply a mask to an image
+
+    :param image: image to apply mask to
+    :param mask: mask to apply to the image
+    :return: masked image
+    """
+    if mask is not None:
+        data = np.where(mask, fill_value, data)
+    return data
+
+
+def replace_nans_with_median(data: np.ndarray) -> np.ndarray:
+    """
+    Replace NaNs with the median of the image
+
+    :param image: image to replace NaNs in
+    :return: image with NaNs replaced with the median
+    """
+    # replace NaNs with the median of the image
+    data = np.nan_to_num(data, nan=np.nanmedian(data))
+    return data
+
+
+def replace_nans_with_local_median(data: np.ndarray, halfwin: int = 1) -> np.ndarray:
+    """
+    Replace every NaN/inf in *data* by the median of its local window.
+
+    Parameters
+    ----------
+    data
+        2‑D NumPy array (image) – **will not be modified in‑place**.
+    halfwin
+        Window “radius”;
+        1 ⇒ 3×3 neighbourhood, 2 ⇒ 5×5, …
+
+    Returns
+    -------
+    A *copy* of *data* with all non‑finite pixels filled.
+    """
+    if data.ndim != 2:
+        raise ValueError("Input must be a 2‑D array")
+
+    filled = data.copy().astype(float)  # work on a copy
+
+    # build a square footprint for the filter
+    size = 2 * halfwin + 1
+    footprint = np.ones((size, size), dtype=bool)
+
+    # median‑filter the whole image, skipping NaNs inside the window
+    filtered = generic_filter(
+        filled,
+        function=_nanmedian,
+        footprint=footprint,
+        mode="nearest",  # replicate edge pixels
+        cval=np.nan,  # area outside image treated as NaN
+    )
+
+    # write the filtered value *only* where data is non‑finite
+    bad = ~np.isfinite(filled)
+    filled[bad] = filtered[bad]
+
+    return filled
+
+
+def remove_horizontal_stripes(
+    data: np.ndarray, mask: Optional[np.ndarray] = None
+) -> np.ndarray:
+    """
+    Destripe an image
+
+    :param image: image to destripe
+    :param mask: mask to apply to the image
+    :return: destriped image
+    """
+    if mask is not None:
+        data = np.where(mask, np.nan, data)
+
+    # destripe the image
+    # by subtracting the median of each row from each pixel in that row
+    row_medians = np.nanmedian(data, axis=1)
+    data -= np.outer(row_medians, np.ones(data.shape[1]))
+    return data
+
+
+def mask_hot_pixels(data: np.ndarray, threshold: Optional[float] = None) -> np.ndarray:
+    """
+    Mask hot pixels in an image
+
+    :param image: image to mask hot pixels in
+    :param threshold: threshold to use for masking hot pixels
+    :return: image with hot pixels masked
+    """
+    if threshold is None:
+        return data
+
+    # mask hot pixels
+    data[data > threshold] = np.nan
+    return data
+
+
+# deprecate this:
+def build_flat(
     bkg_data: List[np.ndarray] | np.ndarray, dark_data: np.ndarray, mask=None
 ):
     """
@@ -86,62 +226,7 @@ def build_dither_flat(
     return dither_flat_data
 
 
-def remove_horizontal_stripes(
-    data: np.ndarray, mask: Optional[np.ndarray] = None
-) -> np.ndarray:
-    """
-    Destripe an image
-
-    :param image: image to destripe
-    :param mask: mask to apply to the image
-    :return: destriped image
-    """
-    if mask is not None:
-        data = np.where(mask, np.nan, data)
-
-    # destripe the image
-    # by subtracting the median of each row from each pixel in that row
-    row_medians = np.nanmedian(data, axis=1)
-    data -= np.outer(row_medians, np.ones(data.shape[1]))
-    return data
-
-
-def apply_mask(data: np.ndarray, mask: Optional[np.ndarray] = None) -> np.ndarray:
-    """
-    Apply a mask to an image
-
-    :param image: image to apply mask to
-    :param mask: mask to apply to the image
-    :return: masked image
-    """
-    if mask is not None:
-        data = np.where(mask, np.nan, data)
-    return data
-
-
-def replace_nans_with_median(data: np.ndarray) -> np.ndarray:
-    """
-    Replace NaNs with the median of the image
-
-    :param image: image to replace NaNs in
-    :return: image with NaNs replaced with the median
-    """
-    # replace NaNs with the median of the image
-    data = np.nan_to_num(data, nan=np.nanmedian(data))
-    return data
-
-
-def mask_hot_pixels(data: np.ndarray, threshold: Optional[float] = None) -> np.ndarray:
-    """
-    Mask hot pixels in an image
-
-    :param image: image to mask hot pixels in
-    :param threshold: threshold to use for masking hot pixels
-    :return: image with hot pixels masked
-    """
-    if threshold is None:
-        return data
-
-    # mask hot pixels
-    data[data > threshold] = np.nan
-    return data
+def _nanmedian(vec: np.ndarray) -> float:
+    """Helper for generic_filter – median of finite values in *vec*."""
+    vec = vec[np.isfinite(vec)]
+    return np.nanmedian(vec) if vec.size else np.nan
