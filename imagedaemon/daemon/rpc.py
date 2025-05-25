@@ -9,6 +9,7 @@ from typing import Optional
 import Pyro5.core
 import Pyro5.errors
 import Pyro5.server
+import Pyro5.socketutil
 from PySide6 import QtCore
 
 log = logging.getLogger("imagedaemon.rpc")
