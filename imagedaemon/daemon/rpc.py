@@ -9,6 +9,7 @@ from typing import Optional
 import Pyro5.core
 import Pyro5.errors
 import Pyro5.server
+import Pyro5.socketutil
 from PySide6 import QtCore
 
 log = logging.getLogger("imagedaemon.rpc")
@@ -26,10 +27,28 @@ class PyroThread(QtCore.QThread):
     PING_SEC = 5
     RETRY_SEC = 1
 
-    def __init__(self, obj, name: str, ns_host: Optional[str]):
+    def __init__(
+        self, obj, name: str, ns_host: Optional[str], daemon_host: Optional[str] = None
+    ):
         super().__init__()
         self.obj = obj
         self.name = name
+        # this trick makes sure we're not using localhost and can be reached externally
+        print(f"PyroThread for {self.name} on {daemon_host} (ns: {ns_host})")
+        if ns_host is None:
+            self.ns_host = Pyro5.socketutil.get_ip_address(
+                "localhost", workaround127=True, version=4
+            )
+        else:
+            self.ns_host = ns_host
+        if daemon_host is None:
+            print(f"we don't want to use localhost for the daemon")
+            self.daemon_host = Pyro5.socketutil.get_ip_address(
+                "localhost", workaround127=True, version=4
+            )
+        else:
+            self.daemon_host = daemon_host
+        print(f"PyroThread for {self.name} on {self.daemon_host} (ns: {self.ns_host})")
         self.ns_host = ns_host
         self._stopping = threading.Event()
         self._daemon: Pyro5.server.Daemon | None = None
@@ -54,7 +73,8 @@ class PyroThread(QtCore.QThread):
         log.info("Registered %s [%s]", self.name, uri)
 
     def run(self):
-        self._daemon = Pyro5.server.Daemon()
+        print(f"Starting Pyro thread for {self.name} on {self.daemon_host}")
+        self._daemon = Pyro5.server.Daemon(self.daemon_host)
         # store the uri, so that it can be re‑registered
         # in case the NameServer goes down
         self._uri = self._daemon.register(self.obj)  # store once
