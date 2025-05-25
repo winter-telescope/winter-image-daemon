@@ -73,10 +73,21 @@ class CameraWorker(QtCore.QObject):
         }
 
     @Pyro5.server.expose
-    def run_focus_loop(self, image_list: list[str], **kwargs):
-        if hasattr(self.pipelines, "run_focus_loop"):
-            return self.pipelines.run_focus_loop(image_list, **kwargs)
-        raise NotImplementedError("Focus loop not implemented for this camera")
+    def run_focus_loop(
+        self, image_list: list[str], addrs: str, output_dir: str, **kwargs
+    ):
+        """run a focus loop on the specified image list.
+        For multiple sensor images (e.g. WINTER), optional
+        addrs argument can be used to specify which sensors to
+        use in the aggregated median best focus."""
+
+        results = self.pipelines.run_focus_loop(
+            image_list=image_list,
+            addrs=addrs,
+            output_dir=output_dir,
+            **kwargs,
+        )
+        return results
 
     @Pyro5.server.expose
     def validate_startup(self, bias_image: str, **kwargs):

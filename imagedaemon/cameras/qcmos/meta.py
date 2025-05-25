@@ -19,6 +19,7 @@ class QcmosMeta(BaseMeta):
         "mask": False,
         "mask_hot_pixels": True,
         "replace_nans_with_median": True,
+        "replace_nans_with_local_median": False,
     }
     # focus steps
     focus_addrs: list[str] = []  # just a winter thing
@@ -31,4 +32,5 @@ class QcmosMeta(BaseMeta):
         "mask": False,
         "mask_hot_pixels": False,
         "replace_nans_with_median": True,
+        "replace_nans_with_local_median": False,
     }

@@ -5,7 +5,7 @@ from typing import Dict, Optional, Tuple
 
 from pydantic import BaseModel
 
-from imagedaemon.utils.paths import CAL_DATA_DIR, FOCUS_OUTPUT_DIR
+from imagedaemon.utils.paths import CAL_DATA_DIR, CONFIG_DIR, FOCUS_OUTPUT_DIR
 
 
 class BaseMeta(BaseModel):
@@ -24,6 +24,31 @@ class BaseMeta(BaseModel):
     cal_steps: Dict[str, bool]
     # which steps to run in a focus loop
     focus_cal_steps: Dict[str, bool]
+
+    """ Source Extractor configuration files:
+    # where are the source extractor config files?
+    Each camera may override *sex_cfg_dir* if it ships its own set of
+    astrom.sex / .param / default.conv / default.nnw files.
+    """
+
+    # --- SExtractor configuration ---------------------------------------
+    sex_cfg_dir: Path = CONFIG_DIR  # <── global default
+
+    @property
+    def sextractor_sex_file(self) -> Path:
+        return self.sex_cfg_dir / "astrom.sex"
+
+    @property
+    def sextractor_param_file(self) -> Path:
+        return self.sex_cfg_dir / "astrom.param"
+
+    @property
+    def sextractor_filter_file(self) -> Path:
+        return self.sex_cfg_dir / "default.conv"
+
+    @property
+    def sextractor_nnw_file(self) -> Path:
+        return self.sex_cfg_dir / "default.nnw"
 
     class Config:
         frozen = True  # immutable once constructed

@@ -15,7 +15,10 @@ def main():
         help="comma‑separated list of camera names on this host",
     )
     ap.add_argument(
-        "--ns-host", default=None, help="Pyro NameServer host (default: autodetect)"
+        "-n",
+        "--ns-host",
+        default=None,
+        help="Pyro NameServer host (default: autodetect)",
     )
     ap.add_argument("--logfile", default=None)
     args = ap.parse_args()

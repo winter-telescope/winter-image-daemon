@@ -7,6 +7,7 @@
 from typing import List, Optional
 
 import numpy as np
+from scipy.ndimage import generic_filter
 
 
 class CalibrationError(Exception):
@@ -103,6 +104,47 @@ def replace_nans_with_median(data: np.ndarray) -> np.ndarray:
     return data
 
 
+def replace_nans_with_local_median(data: np.ndarray, halfwin: int = 1) -> np.ndarray:
+    """
+    Replace every NaN/inf in *data* by the median of its local window.
+
+    Parameters
+    ----------
+    data
+        2‑D NumPy array (image) – **will not be modified in‑place**.
+    halfwin
+        Window “radius”;
+        1 ⇒ 3×3 neighbourhood, 2 ⇒ 5×5, …
+
+    Returns
+    -------
+    A *copy* of *data* with all non‑finite pixels filled.
+    """
+    if data.ndim != 2:
+        raise ValueError("Input must be a 2‑D array")
+
+    filled = data.copy().astype(float)  # work on a copy
+
+    # build a square footprint for the filter
+    size = 2 * halfwin + 1
+    footprint = np.ones((size, size), dtype=bool)
+
+    # median‑filter the whole image, skipping NaNs inside the window
+    filtered = generic_filter(
+        filled,
+        function=_nanmedian,
+        footprint=footprint,
+        mode="nearest",  # replicate edge pixels
+        cval=np.nan,  # area outside image treated as NaN
+    )
+
+    # write the filtered value *only* where data is non‑finite
+    bad = ~np.isfinite(filled)
+    filled[bad] = filtered[bad]
+
+    return filled
+
+
 def remove_horizontal_stripes(
     data: np.ndarray, mask: Optional[np.ndarray] = None
 ) -> np.ndarray:
@@ -182,3 +224,9 @@ def build_flat(
     dither_flat_data = median_bkg_darksub_data / np.nanmedian(median_bkg_darksub_data)
 
     return dither_flat_data
+
+
+def _nanmedian(vec: np.ndarray) -> float:
+    """Helper for generic_filter – median of finite values in *vec*."""
+    vec = vec[np.isfinite(vec)]
+    return np.nanmedian(vec) if vec.size else np.nan

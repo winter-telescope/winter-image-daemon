@@ -178,6 +178,8 @@ class BasePipelines:
     # ======================================================================
     #   PUBLIC – batch calibration for focus loops
     # ======================================================================
+    from pathlib import Path
+
     def calibrate_for_focus(
         self,
         image_paths: list[str | Path],
@@ -185,80 +187,74 @@ class BasePipelines:
         override_steps: dict[str, bool] | None = None,
         out_dir: str | Path | None = None,
         **opts,
-    ) -> dict[str, list[str]]:
-        """
-        Calibrate a *list* of raw `Image` objects for a focus loop.
-
-        The default logic is ideal for single‑detector cameras:
-
-        1.  Build a **single** dither flat from *all* frames
-            (if those steps are enabled).
-        2.  Apply the same master dark, lab flat, dither flat … to every frame.
-        3.  Return the calibrated `Image` objects in the same order.
-
-        Multi‑detector cameras (e.g. WINTER) override this method to
-        group frames by sensor address and call
-        `_calibrate_data()` separately per sensor.
-        """
-        # load in the data as a dictionary of sensor -> list of Image objects
+    ) -> dict[str, list[Path]]:
         image_dict = self._load_focus_images(image_paths)
         if not image_dict:
             raise ValueError("No images to calibrate")
 
-        print("image_dict", image_dict)
-
-        steps = self._decide_steps(None)
-
-        # use the first image from the first sensor to get the exptime
-        first_key = list(image_dict.keys())[0]
-        exptime = self._get_exptime(image_dict[first_key][0])
-        log.debug("Loaded image   EXPTIME = %.2fs", exptime)
-
-        # ---------- calibrate every frame -------------------------------
+        # default to ALL sensors if the caller didn't down-select
         if addrs is None:
-            addrs = [""]
-        calibrated_images_dict = {}
+            addrs = list(image_dict.keys())
+
+        steps = self._decide_steps(override_steps, kind="focus")
+
+        # make our output directory, if requested
+        out_path = Path(out_dir).expanduser() if out_dir else None
+        if out_path:
+            out_path.mkdir(parents=True, exist_ok=True)
+
+        calibrated = {}
+
+        # for each requested sensor
         for addr in addrs:
-            images = image_dict[addr]
-            # build once per sensor
-            precomputed = {}
+            sensor_imgs = image_dict[addr]  # [Image,Image,…]
+            raw_for_this_sensor = image_paths  # same length & order
+
+            # precompute any flats/darks …
+            pre = {}
             if steps["dither_flat"]:
-                precomputed["dither_flat"] = self._make_flat(
-                    [im.path for im in images],
-                    exptime=exptime,
+                pre["dither_flat"] = self._make_flat(
+                    [p for p in raw_for_this_sensor],
+                    exptime=self._get_exptime(sensor_imgs[0]),
                     addr=addr,
                 ).data
 
-            # ---------- calibrate every frame -------------------------------
+                # save the dither flat to a tmp directory to verify it is working
+                import os
 
-            calibrated_filepaths = []
-            for im in images:
+                tmpdir = os.path.join(os.getenv("HOME"), "data", "tmp")
+                dither_flat_image = Image(pre["dither_flat"])
+                dither_flat_image.save_image(
+                    os.path.join(tmpdir, f"{addr}_test_dither_flat.fits")
+                )
+            out_files: list[Path] = []
+
+            # now calibrate each one
+            for raw_path, im in zip(raw_for_this_sensor, sensor_imgs):
                 data_cal = self._calibrate_data(
                     im.data.copy(),
                     mask=im.mask,
                     header=im.header,
-                    addr="",  # single‑sensor camera
-                    exptime=exptime,
+                    addr=addr,
+                    exptime=self._get_exptime(im),
                     steps=steps,
-                    precomputed=precomputed,
+                    precomputed=pre,
                 )
+                cal_img = Image(data_cal, im.header, mask=im.mask)
 
-                calibrated_image = Image(data_cal, im.header, mask=im.mask)
-                # save the calibrated image to the output directory, replace ".fits" with ".cal.fits"
-                if out_dir:
-                    out_dir = Path(out_dir).expanduser()
-                    out_dir.mkdir(parents=True, exist_ok=True)
-                    filepath = Path(im.filename)
-                    print(f"input filepath: {filepath}")
-                    cal_path = out_dir / (filepath.with_suffix(".cal.fits"))
-                    print(f"calibrated output filepath: {cal_path}")
-                    calibrated_image.save_image(cal_path)
-                    log.debug("Calibrated FITS written to %s", cal_path)
-                calibrated_filepaths.append(cal_path)
+                if out_path:
+                    stem = Path(raw_path).stem  # e.g. "IMG00123"
+                    fname = f"{stem}_{addr}.cal.fits"  # "IMG00123_pa.cal.fits"
+                    cal_path = out_path / fname
+                    cal_img.save_image(cal_path)
+                    out_files.append(cal_path)
+                else:
+                    # if you wanted to keep them in-memory, you could skip saving
+                    out_files.append(None)  # or store the Image itself
 
-            calibrated_images_dict[addr] = calibrated_filepaths
+            calibrated[addr] = out_files
 
-        return calibrated_images_dict
+        return calibrated
 
     '''
     def measure_fwhm_of_calibrated_images(
@@ -397,6 +393,7 @@ class BasePipelines:
                 image_paths=paths,
                 override_steps=override_steps,
                 out_dir=out_dir,
+                addr=sensor,
                 **kwargs,
             )
             # fwhm_res is {"fwhm_median":[…],"fwhm_mean":[…],"fwhm_std":[…]}
@@ -471,13 +468,20 @@ class BasePipelines:
         for image_path in image_paths:
 
             # step 1 make sure there is a weight image for the sensor, and make it if not
-            if not self._weight_image_exists(addr):
+            if True:  # not self._weight_image_exists(addr):
                 # make the weight image
                 img = Image(image_path)
-                weight_image_path = img.save_mask_image(
+                mask = self._get_default_mask(img, addr)
+                img.mask = mask
+
+                weight_image_path = img.save_weight_image(
                     filename=self.meta.weight_file_path(addr)
                 )
                 log.debug("Weight image generated for sensor %s", addr)
+            else:
+                log.debug(
+                    f"Weight image already exists for sensor {addr}: {self.meta.weight_file_path(addr)}"
+                )
 
             # step 2: run sextractor on the saved calibrated images, or just pull
             # the results from existing tables
@@ -490,6 +494,10 @@ class BasePipelines:
                 ylolim=10,
                 yuplim=2000,
                 exclude=False,
+                sex_config=self.meta.sextractor_sex_file,
+                sex_param=self.meta.sextractor_param_file,
+                sex_filter=self.meta.sextractor_filter_file,
+                sex_nnw=self.meta.sextractor_nnw_file,
             )
             # step 3: add the results to the lists
             fwhm_mean.append(mean)
@@ -622,12 +630,18 @@ class BasePipelines:
         plt.close(fig)
 
         # ------------------------------------------------------------------
-        return {
+
+        results = {
             "best_focus": float(p_global[0]),
             "per_sensor": per_sensor,
             "plot": str(plot_path),
             "results": fwhm_dict,
         }
+
+        # clean up the results dictionary so that it only contains native python types and
+        # that the results are lists not np arrays. this is important for pyro serialization
+        results = sanitize_for_serialization(results)
+        return results
 
     # ======================================================================
     #   HELPER METHODS  (meant to be overridden by camera subclasses)
@@ -657,6 +671,15 @@ class BasePipelines:
         bkg_images           focus‑loop list to build dither/sky flats
         precomputed          {'dither_flat': ndarray, 'sky_flat': ndarray, …}
         """
+
+        def stats(stage, arr):
+            nfin = np.isfinite(arr).sum()
+            print(
+                f"[DEBUG][{addr}] {stage}: finite={nfin}/{arr.size}, min={np.nanmin(arr):.3g}, max={np.nanmax(arr):.3g}"
+            )
+
+        print(f"running _calibrate_data with addr={addr}")
+        stats("raw", data)
         precomputed = precomputed or {}
         log.debug("Applying calibration steps: %s", steps)
         if addr is not None:
@@ -664,23 +687,27 @@ class BasePipelines:
         if steps["mask"]:
             log.debug("Applying mask")
             data = calibration.apply_mask(data, mask)
+            stats("after mask", data)
 
         if steps["dark"]:
             log.debug("Applying dark subtraction")
             data = calibration.subtract_dark(data, self._load_dark(exptime, addr).data)
-
+            stats("after dark", data)
         if steps["lab_flat"]:
             log.debug("pulling lab flat")
             data = calibration.flat_correct(data, self._load_lab_flat(addr).data)
-
+            stats("after lab flat", data)
         if steps["dither_flat"]:
             log.debug("building dither flat")
-            flat = (
-                precomputed.get("dither_flat")
-                or self._make_flat(bkg_images or [], exptime=exptime, addr=addr).data
-            )
-            data = calibration.flat_correct(data, flat)
+            try:
+                flat = precomputed["dither_flat"]
+            except KeyError:
+                flat = self._make_flat(
+                    bkg_images or [], exptime=exptime, addr=addr
+                ).data
 
+            data = calibration.flat_correct(data, flat)
+            stats("after dither flat", data)
         if steps["sky_flat"]:
             # log that we are here
 
@@ -697,17 +724,24 @@ class BasePipelines:
             else:
                 log.debug("Using precomputed sky flat")
             data = calibration.flat_correct(data, flat)
+            stats("after sky flat", data)
 
         if steps["mask_hot_pixels"]:
             data = calibration.mask_hot_pixels(
                 data, threshold=self._hot_pixel_threshold()
             )
-
+            stats("after hot pixel mask", data)
         if steps["remove_horizontal_stripes"]:
             data = calibration.remove_horizontal_stripes(data, mask)
+            stats("after horizontal stripes", data)
 
         if steps["replace_nans_with_median"]:
             data = calibration.replace_nans_with_median(data)
+            stats("after NaN replacement", data)
+
+        if steps["replace_nans_with_local_median"]:
+            data = calibration.replace_nans_with_local_median(data)
+            stats("after NaN replacement", data)
 
         return data
 
@@ -726,6 +760,17 @@ class BasePipelines:
             # if no weight image is found, return False
             # this will be overridden in the camera subclass
         return False
+
+    def _get_default_mask(self, img: Image, addr: str | None) -> np.ndarray:
+        """
+        Return the default mask for the given sensor address.
+
+        Default: no mask.
+        """
+        # default mask is none
+        mask = np.zeros_like(img.data, dtype=bool)
+
+        return mask
 
     def _get_focus_position(self, img: Image) -> float:
         """

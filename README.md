@@ -20,3 +20,16 @@ Will need:
 
 There are more detailed instructions here: is to follow the instructions for these here: [mirar installation instructions](https://mirar.readthedocs.io/en/latest/installation.html)
 
+
+## Required Data
+The data reductions require sets of standard calibration data.
+
+## Running the daemon
+The daemon can be run on any number of machines, to handle any number of cameras.
+
+A daemon instance is launched like: 
+
+"""python:
+imagedaemon-daemon --cameras winter,qcmos --logfile /var/log/daemon.log`
+"""
+

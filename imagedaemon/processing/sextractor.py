@@ -78,7 +78,8 @@ def run_sextractor(
             + " "
             + "-WEIGHT_TYPE NONE -CHECKIMAGE_TYPE NONE -PIXEL_SCALE "
             + str(pixscale)
-            + " -DETECT_THRESH 10 -ANALYSIS_THRESH 10 -SATUR_LEVEL 60000 -WEIGHT_TYPE MAP_WEIGHT -WEIGHT_IMAGE "
+            + " -DETECT_THRESH 10 -ANALYSIS_THRESH 10 -SATUR_LEVEL 100000 -WEIGHT_TYPE MAP_WEIGHT -WEIGHT_IMAGE "
+            # + " -DETECT_THRESH 3 -ANALYSIS_THRESH 3 -SATUR_LEVEL 60000 -WEIGHT_TYPE MAP_WEIGHT -WEIGHT_IMAGE "
             + weightimg
             + " -CHECKIMAGE_NAME "
             + imgname
@@ -156,6 +157,12 @@ def get_img_fwhm(
     ylolim: int = 10,
     yuplim: int = 2000,
     exclude: bool = False,
+    force_source_extraction: bool = True,
+    regions: bool = True,
+    sex_config: str | Path | None = None,
+    sex_param: str | Path | None = None,
+    sex_filter: str | Path | None = None,
+    sex_nnw: str | Path | None = None,
 ) -> tuple[float, float, float]:
     """
     Run SExtractor on `imgname` (if needed), load the catalog, and return
@@ -186,12 +193,17 @@ def get_img_fwhm(
     catpath = Path(str(imgpath) + ".cat")
 
     # run SExtractor if the catalog doesn't exist yet
-    if not catpath.exists():
+    if not catpath.exists() or force_source_extraction:
         print(f"Running SExtractor on {imgpath.name}...")
         run_sextractor(
             str(imgpath),
             pixscale,
             weightimg=str(weightpath),
+            regions=regions,
+            sex_config=sex_config,
+            sex_param=sex_param,
+            sex_filter=sex_filter,
+            sex_nnw=sex_nnw,
         )
 
     # read the LDAC catalog

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from pathlib import Path
 from typing import List
+
+import numpy as np
 
 from imagedaemon.cameras.winter.winter_image import WinterImage
 from imagedaemon.pipelines.base import BasePipelines
@@ -42,28 +45,36 @@ class WinterPipelines(BasePipelines):
 
     def _load_focus_images(
         self,
-        image_list: list[str | Path | Image],
-    ) -> dict:  # make a dictionary of sensor -> list of Image objects
-        images = [
-            WinterImage(path) if isinstance(path, str) else path for path in image_list
+        image_list: list[str | Path | WinterImage],
+    ) -> dict[str, list[Image]]:
+        """
+        Turn a list of MEF paths (or WinterImage instances) into a dict
+        addr -> list of single‐sensor Image instances.
+        """
+        # first wrap any raw paths
+        winter_imgs = [
+            img if isinstance(img, WinterImage) else WinterImage(img)
+            for img in image_list
         ]
-        if not images:
+        if not winter_imgs:
             raise ValueError("No images to calibrate")
-        if len(images) < 4:
+        if len(winter_imgs) < 4:
             raise ValueError("Need at least 4 images to fit a best focus parabola")
-        addrs = WinterImage.get_addrs()
 
-        # instantiate a dict of empty lists for each addr
-        image_dict = {}
-        for addr in addrs:
-            image_dict[addr] = []
+        image_dict: dict[str, list[Image]] = defaultdict(list)
 
-        for image in images:
-            for addr in addrs:
-                image.get_sensor_image(addr)
-                image_dict[addr].append(image)
+        # for each MEF, pull out every sensor that actually exists
+        for wimg in winter_imgs:
+            for addr in WinterImage.get_addrs():
+                try:
+                    sensor_img = wimg.get_sensor_image(addr)
+                except KeyError:
+                    # that sub-image wasn’t in this file, skip it
+                    continue
+                image_dict[addr].append(sensor_img)
 
-        return image_dict
+        # you might want to cast back to a normal dict
+        return dict(image_dict)
 
     # ----- calibration assets ---------------------------------------
     def _load_dark(self, exptime: float, addr: str | None) -> Image:
@@ -115,6 +126,15 @@ class WinterPipelines(BasePipelines):
         # Wrap ndarray in Image (empty header is fine for flats)
         return Image(flat_data, header={})
         """
+
+    def _get_default_mask(self, img: Image, addr: str | None) -> np.ndarray:
+
+        # get the default mask for this image
+        mask = WinterImage.get_raw_winter_mask(
+            img.data, WinterImage._board_id_by_addr[addr]
+        )
+
+        return mask
 
     def _make_flat(
         self,
