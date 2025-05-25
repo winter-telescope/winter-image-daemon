@@ -29,7 +29,7 @@ The daemon can be run on any number of machines, to handle any number of cameras
 
 A daemon instance is launched like: 
 
-"""python:
-imagedaemon-daemon --cameras winter,qcmos --logfile /var/log/daemon.log`
-"""
+```bash:
+imagedaemon-daemon --cameras winter,qcmos --logfile /var/log/daemon.log
+```
 
