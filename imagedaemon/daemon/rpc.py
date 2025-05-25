@@ -1,14 +1,8 @@
-# daemon/rpc.py
-from __future__ import annotations
-
 import logging
 import threading
 import time
-from typing import Optional
 
 import Pyro5.core
-import Pyro5.errors
-import Pyro5.server
 import Pyro5.socketutil
 from PySide6 import QtCore
 
@@ -16,43 +10,32 @@ log = logging.getLogger("imagedaemon.rpc")
 
 
 class PyroThread(QtCore.QThread):
-    """
-    Runs a Pyro5 requestLoop *and* guarantees the object is (re)registered
-    in the NameServer.  It will:
-
-        • retry every second if Ns is down at startup
-        • ping Ns every 5 s; if registration is lost it re‑registers
-    """
-
     PING_SEC = 5
     RETRY_SEC = 1
 
     def __init__(
-        self, obj, name: str, ns_host: Optional[str], daemon_host: Optional[str] = None
+        self, obj, name: str, ns_host: str | None = None, daemon_host: str | None = None
     ):
         super().__init__()
         self.obj = obj
         self.name = name
-        # this trick makes sure we're not using localhost and can be reached externally
-        if ns_host is None:
-            self.ns_host = Pyro5.socketutil.get_ip_address(
-                "localhost", workaround127=True
-            )
-        else:
-            self.ns_host = ns_host
-        if daemon_host is None:
-            self.daemon_host = Pyro5.socketutil.get_ip_address(
-                "localhost", workaround127=True
-            )
-        else:
-            self.daemon_host = daemon_host
 
-        self.ns_host = ns_host
+        # ---------- choose IPs -----------------------------------------
+        def my_ip_for(target: str | None) -> str:
+            """Return non‑loopback IP chosen for packets toward *target*."""
+            return Pyro5.socketutil.get_ip_address(target, workaround127=True)
+
+        self.ns_host = ns_host or my_ip_for(None)  # broadcast OK
+        self.daemon_host = daemon_host or my_ip_for(self.ns_host)
+
+        log.debug(
+            "NameServer host = %s | Daemon host = %s", self.ns_host, self.daemon_host
+        )
+
         self._stopping = threading.Event()
-        self._daemon: Pyro5.server.Daemon | None = None
+        self._daemon = None
+        self._uri = None  # filled in run()
 
-    # ------------------------------------------------------------------
-    # public API
     # ------------------------------------------------------------------
     def stop(self):
         self._stopping.set()
@@ -60,43 +43,32 @@ class PyroThread(QtCore.QThread):
             self._daemon.shutdown()  # unblocks requestLoop
 
     # ------------------------------------------------------------------
-    # private helpers
-    # ------------------------------------------------------------------
-    def _locate_ns(self):
-        return Pyro5.core.locate_ns(host=self.ns_host)
-
-    def _register(self, ns):
-        uri = self._daemon.register(self.obj)
-        ns.register(self.name, uri)
-        log.info("Registered %s [%s]", self.name, uri)
-
     def run(self):
-        self._daemon = Pyro5.server.Daemon(self.daemon_host)
-        # store the uri, so that it can be re‑registered
-        # in case the NameServer goes down
-        self._uri = self._daemon.register(self.obj)  # store once
+        # 1.  create the daemon on the chosen interface
+        self._daemon = Pyro5.server.Daemon(host=self.daemon_host)
+        self._uri = self._daemon.register(self.obj)
 
-        # -------- wait for NameServer ---------------------------------
+        # 2.  wait for NameServer, then register once
         while not self._stopping.is_set():
             try:
                 self._ns = Pyro5.core.locate_ns(host=self.ns_host)
-                self._ns.register(self.name, self._uri)  # first registration
+                self._ns.register(self.name, self._uri)
                 log.info("Registered %s [%s]", self.name, self._uri)
                 break
             except Exception as e:
                 log.warning(
-                    "NameServer unavailable (%s). Retry in %ds", e, self.RETRY_SEC
+                    "NameServer unavailable (%s). retry in %ds", e, self.RETRY_SEC
                 )
                 time.sleep(self.RETRY_SEC)
 
-        if self._stopping.is_set():
+        if self._stopping.is_set():  # interrupted during wait
             self._daemon.close()
             return
 
-        # -------- periodic ping & re‑registration ---------------------
+        # 3.  main request loop with periodic re‑registration
         last_ping = time.time()
 
-        def loop_cond() -> bool:
+        def loop_cond():
             nonlocal last_ping
             if self._stopping.is_set():
                 return False
@@ -104,14 +76,13 @@ class PyroThread(QtCore.QThread):
             if time.time() - last_ping > self.PING_SEC:
                 last_ping = time.time()
                 try:
-                    self._ns.lookup(self.name)  # still present?
+                    self._ns.lookup(self.name)
                 except Exception:
                     try:
                         self._ns.register(self.name, self._uri)
                         log.info("Re‑registered %s", self.name)
-                    except Exception as e:
-                        log.warning("Re‑registration failed (%s)", e)
-                        # maybe Ns went down again → locate it on next ping
+                    except Exception:
+                        # Ns probably down again – locate on next ping
                         try:
                             self._ns = Pyro5.core.locate_ns(host=self.ns_host)
                         except Exception:
@@ -122,8 +93,9 @@ class PyroThread(QtCore.QThread):
         self._daemon.close()
 
 
-# convenience wrapper remains unchanged
-def register_object(obj, name: str, ns_host: str | None):
-    t = PyroThread(obj, name, ns_host)
+# ----------------------------------------------------------------------
+def register_object(obj, name, *, ns_host=None, daemon_host=None):
+    """Spawn a background thread exporting *obj* under *name* in Pyro."""
+    t = PyroThread(obj, name, ns_host=ns_host, daemon_host=daemon_host)
     t.start()
     return t
