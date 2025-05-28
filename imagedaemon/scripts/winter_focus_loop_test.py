@@ -54,6 +54,7 @@ winter_focus_calibrated = winter.calibrate_for_focus(
     image_paths=winter_focus_images,
     out_dir=os.path.join(os.getenv("HOME"), "data", "tmp"),
     addrs=["pa", "pb", "pc"],
+    post_plot_to_slack=True,
 )
 
 print(f"Winter Focus calibrated images: {winter_focus_calibrated}")
