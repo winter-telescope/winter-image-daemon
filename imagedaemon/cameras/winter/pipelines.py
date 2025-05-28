@@ -6,12 +6,16 @@ from pathlib import Path
 from typing import List
 
 import numpy as np
+from matplotlib import pyplot as plt
 
 from imagedaemon.cameras.winter.winter_image import WinterImage
 from imagedaemon.pipelines.base import BasePipelines
 from imagedaemon.processing import calibration
+from imagedaemon.processing.focus import fit_parabola, parabola
 from imagedaemon.utils.image import Image
+from imagedaemon.utils.notify import SlackNotifier
 from imagedaemon.utils.paths import CAL_DATA_DIR
+from imagedaemon.utils.serialization import sanitize_for_serialization
 
 # ----------------------------------------------------------------------
 # camera‑specific logger
@@ -75,6 +79,141 @@ class WinterPipelines(BasePipelines):
 
         # you might want to cast back to a normal dict
         return dict(image_dict)
+
+    # ----- focus analysis and plotting helpers ----------------------------
+    def _analyze_and_plot_fwhm_results(
+        self,
+        fwhm_dict: dict,
+        outdir: Path | str,
+        post_plot_to_slack: bool = False,
+    ) -> dict:
+        """
+        Analyze the FWHM results and plot them.
+        Returns a dictionary with the results and paths to the plots.
+        """
+
+        # ------------------------------------------------------------------
+        # fit each sensor separately  +  plot
+        # ------------------------------------------------------------------
+
+        focus_positions = np.asarray(fwhm_dict["focus_positions"])
+        sensors_dict = fwhm_dict["sensors"]  # {'pa': {...}, 'pb': {...}, …}
+
+        fig, axes = plt.subplots(
+            nrows=3,
+            ncols=2,
+            figsize=(12, 12),
+        )
+
+        # Matplotlib quirk: when nrows == 1, axes is a single Axes object
+        if not isinstance(axes, (list, np.ndarray)):
+            axes = [axes]
+
+        per_sensor = {}
+
+        # channel mapping
+
+        # ---------- per‑sensor fits ----------
+        # iterate over all winter sensors
+        all_addrs = WinterImage.get_addrs()
+        for i, addr in enumerate(all_addrs):
+            rowcol = WinterImage._rowcol_locs_by_addr[addr]
+            row, col = rowcol
+            ax = axes[row, col]
+
+            vals = sensors_dict.get(addr, None)
+            if vals is None:
+                log.warning("No FWHM data for sensor %s, skipping", addr)
+                continue
+            med = np.asarray(vals["fwhm_median"])
+            std = np.asarray(vals["fwhm_std"])
+            foc = focus_positions
+
+            popt = fit_parabola(foc, med, std)  # [best_focus, a, b] etc.
+            xgrid = np.linspace(foc.min(), foc.max(), 200)
+
+            ax.errorbar(foc, med, yerr=std, fmt="o", label=f"{addr}")
+            ax.plot(xgrid, parabola(xgrid, *popt), label=f"best = {popt[0]:.1f}")
+            ax.set_ylabel("FWHM [arcsec]")
+            ax.legend(frameon=False, loc="upper center", ncols=2)
+            ax.set_xlabel("Focus Position [micron]")
+
+            per_sensor[addr] = {
+                "best_focus": float(popt[0]),
+                "focus": foc.tolist(),
+                "fwhm_median": med.tolist(),
+                "fwhm_std": std.tolist(),
+            }
+        plt.tight_layout()
+        # save the per-sensor results
+        per_sensor_plot_path = Path(outdir) / "focusloop_per_sensor.png"
+        plt.suptitle("Focus loop – per sensor best focus")
+        plt.savefig(per_sensor_plot_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+        # ------------------------------------------------------------------
+        # calculate and plot median focus results
+        # ------------------------------------------------------------------
+
+        focus_positions = np.asarray(fwhm_dict["focus_positions"])
+        fig, ax_global = plt.subplots(
+            nrows=1,
+            ncols=1,
+            figsize=(12, 12),
+            sharex=True,
+        )
+
+        global_med = np.asarray(fwhm_dict["median"]["fwhm_median"])
+        global_std = np.asarray(fwhm_dict["median"]["fwhm_std"])
+
+        p_global = fit_parabola(focus_positions, global_med, global_std)
+
+        xgrid = np.linspace(focus_positions.min(), focus_positions.max(), 200)
+
+        ax_global.errorbar(
+            focus_positions, global_med, yerr=global_std, fmt="o", label="all sensors"
+        )
+        ax_global.plot(
+            xgrid, parabola(xgrid, *p_global), label=f"global best = {p_global[0]:.1f}"
+        )
+        ax_global.set_ylabel("FWHM [arcsec]")
+        ax_global.set_xlabel("Focus Position [micron]")
+        ax_global.legend(frameon=False, loc="upper center", ncols=2)
+
+        plt.suptitle(f"Focus loop – global best = {p_global[0]:.1f}")
+
+        plot_path = outdir / "focusloop_all_sensors.png"
+        plt.savefig(plot_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+        # ------------------------------------------------------------------
+
+        results = {
+            "best_focus": float(p_global[0]),
+            "per_sensor": per_sensor,
+            "plot": str(plot_path),
+            "results": fwhm_dict,
+        }
+
+        if post_plot_to_slack:
+            try:
+                notifier = SlackNotifier()
+                notifier.post_image(
+                    per_sensor_plot_path,
+                    text="Best focus per sensor",
+                )
+                notifier.post_image(
+                    plot_path,
+                    text=f"Ran the focus script and got best focus = {results['best_focus']:.1f}",
+                )
+            except Exception as e:
+                log.error("Failed to post focus loop results to Slack: %s", e)
+        # ------------------------------------------------------------------
+
+        # clean up the results dictionary so that it only contains native python types and
+        # that the results are lists not np arrays. this is important for pyro serialization
+        results = sanitize_for_serialization(results)
+        return results
 
     # ----- calibration assets ---------------------------------------
     def _load_dark(self, exptime: float, addr: str | None) -> Image:

@@ -64,6 +64,7 @@ results = winter.run_focus_loop(
     image_list=winter_focus_images,
     addrs=["pa", "pb", "pc"],
     output_dir=None,
+    post_plot_to_slack=True,
 )
 print(f"Focus loop results: {json.dumps(results, indent=2)}")
 
