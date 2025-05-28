@@ -14,6 +14,7 @@ from imagedaemon.processing.calibration import CalibrationError
 from imagedaemon.processing.focus import fit_parabola, parabola
 from imagedaemon.processing.sextractor import get_img_fwhm
 from imagedaemon.utils.image import Image  # thin wrapper around FITS/WCS
+from imagedaemon.utils.notify import SlackNotifier
 from imagedaemon.utils.serialization import sanitize_for_serialization
 
 log = logging.getLogger("imagedaemon.pipeline")
@@ -516,7 +517,15 @@ class BasePipelines:
     # focus loop orchestrator
     # ------------ orchestrator --------------------------------------------
 
-    def run_focus_loop(self, image_list, *, addrs=None, output_dir=None, **opts):
+    def run_focus_loop(
+        self,
+        image_list,
+        *,
+        addrs=None,
+        output_dir=None,
+        post_plot_to_slack=False,
+        **opts,
+    ):
         """
         Generic driver – *pipeline* is a {Winter,Qcmos,…}Pipelines instance.
 
@@ -637,6 +646,17 @@ class BasePipelines:
             "plot": str(plot_path),
             "results": fwhm_dict,
         }
+
+        if post_plot_to_slack:
+            try:
+                notifier = SlackNotifier()
+                notifier.post_image(
+                    plot_path,
+                    text=f"Ran the focus script and got best focus = {results['best_focus']:.1f}",
+                )
+            except Exception as e:
+                log.error("Failed to post focus loop results to Slack: %s", e)
+        # ------------------------------------------------------------------
 
         # clean up the results dictionary so that it only contains native python types and
         # that the results are lists not np arrays. this is important for pyro serialization
