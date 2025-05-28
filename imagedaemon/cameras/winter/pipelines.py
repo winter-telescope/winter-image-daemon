@@ -14,7 +14,7 @@ from imagedaemon.processing import calibration
 from imagedaemon.processing.focus import fit_parabola, parabola
 from imagedaemon.utils.image import Image
 from imagedaemon.utils.notify import SlackNotifier
-from imagedaemon.utils.paths import CAL_DATA_DIR
+from imagedaemon.utils.paths import ENV_FILE
 from imagedaemon.utils.serialization import sanitize_for_serialization
 
 # ----------------------------------------------------------------------
@@ -197,7 +197,7 @@ class WinterPipelines(BasePipelines):
 
         if post_plot_to_slack:
             try:
-                notifier = SlackNotifier()
+                notifier = SlackNotifier(env_file=ENV_FILE)
                 notifier.post_image(
                     per_sensor_plot_path,
                     text="Best focus per sensor",

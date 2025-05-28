@@ -4,7 +4,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]  # adjust depth to reach repo root
-ENV_FILE = PROJECT_ROOT / ".env"
+GIT_REPO_ROOT = (
+    PROJECT_ROOT.parent
+)  # assuming this is one level up from the project root
+ENV_FILE = GIT_REPO_ROOT / ".env"
 
 # Load once when the module is imported
 load_dotenv(dotenv_path=ENV_FILE, override=False)  # keeps any values already set

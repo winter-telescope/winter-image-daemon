@@ -15,6 +15,7 @@ from imagedaemon.processing.focus import fit_parabola, parabola
 from imagedaemon.processing.sextractor import get_img_fwhm
 from imagedaemon.utils.image import Image  # thin wrapper around FITS/WCS
 from imagedaemon.utils.notify import SlackNotifier
+from imagedaemon.utils.paths import ENV_FILE
 from imagedaemon.utils.serialization import sanitize_for_serialization
 
 log = logging.getLogger("imagedaemon.pipeline")
@@ -853,7 +854,7 @@ class BasePipelines:
 
         if post_plot_to_slack:
             try:
-                notifier = SlackNotifier()
+                notifier = SlackNotifier(env_file=ENV_FILE)
                 notifier.post_image(
                     plot_path,
                     text=f"Ran the focus script and got best focus = {results['best_focus']:.1f}",
