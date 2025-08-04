@@ -36,7 +36,7 @@ print(f"PROJECT_ROOT = {PROJECT_ROOT}")
 print(f"CONFIG_DIR = {CONFIG_DIR}")
 
 DATA_DIR = get_path(
-    "DATA_DIR", os.path.join(os.getenv("HOME"), "data", "image-daemon-data")
+    "DATA_DIR", os.path.join(os.path.expanduser("~"), "data", "image-daemon-data")
 )
 CAL_DATA_DIR = get_path("CAL_DATA_DIR", os.path.join(DATA_DIR, "calibration"))
 RAW_DATA_DIR = get_path("RAW_DATA_DIR", os.path.join(DATA_DIR, "raw"))
@@ -58,7 +58,7 @@ SEXTRACTOR_NNW_FILE = get_path(
 )
 
 OUTPUT_DIR = get_path(
-    "OUTPUT_DIR", os.path.join(os.getenv("HOME"), "data", "image-daemon-data", "output")
+    "OUTPUT_DIR", os.path.join(os.path.expanduser("~"), "data", "image-daemon-data", "output")
 )
 
 FOCUS_OUTPUT_DIR = os.path.join(OUTPUT_DIR, "focus")

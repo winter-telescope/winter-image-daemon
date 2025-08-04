@@ -203,6 +203,9 @@ class BasePipelines:
                 # ---- EXPOSURE -----------------------------------------------
                 exposure = self._get_exptime(img)
 
+                # round the exposure times so we don't get bothered by tiny differences
+                exposure = np.round(exposure, 4)
+
                 records.append(
                     dict(
                         filepath=fits_path,
@@ -231,8 +234,13 @@ class BasePipelines:
         src_dir = Path(src_dir)
 
         if dst_dir is None:
+            if obstype.upper() == "BIAS":
+                foldername = "masterbias"
+            else:
+                foldername = f"master{obstype.lower()}s"
+
             dst_dir = os.path.join(
-                CAL_DATA_DIR, self.meta.name, "master" + obstype.lower()
+                CAL_DATA_DIR, self.meta.name, foldername
             )
 
         dst_dir = Path(dst_dir)
@@ -264,8 +272,9 @@ class BasePipelines:
             # combine the headers
             header = self._intersect_headers([im.header for im in images])
 
+            # make the name
             outname = f"{self.meta.name}_master{obstype.lower()}_{exp_val:.3f}s.fits"
-
+           
             # make a master Image object
             master = Image(median_data, header)
 
@@ -983,7 +992,7 @@ class BasePipelines:
         """
         return header["DECDEG"]
 
-    def _intersect_headers(headers: List["fits.Header"]) -> "fits.Header":
+    def _intersect_headers(self, headers: List["fits.Header"]) -> "fits.Header":
         """Return a header containing only cards identical in every header."""
         out = headers[0].copy()
         for key in list(out.keys()):

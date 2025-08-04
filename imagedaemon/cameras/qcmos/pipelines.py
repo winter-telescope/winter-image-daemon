@@ -23,7 +23,7 @@ class QcmosPipelines(BasePipelines):
     """
 
     # ----- raw image loader -------------------
-    def _load_raw_image(self, path: str | Path, *, addr: str | None) -> Image:
+    def _load_raw_image(self, path: str | Path, *, addr: str | None=None) -> Image:
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"[qCMOS] raw image not found: {path}")
