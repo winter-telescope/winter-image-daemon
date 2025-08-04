@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Iterable, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
+import pandas as pd
+from astropy.io import fits
 from matplotlib import pyplot as plt
 
 from imagedaemon.processing import astrometry, calibration
@@ -15,7 +18,7 @@ from imagedaemon.processing.focus import fit_parabola, parabola
 from imagedaemon.processing.sextractor import get_img_fwhm
 from imagedaemon.utils.image import Image  # thin wrapper around FITS/WCS
 from imagedaemon.utils.notify import SlackNotifier
-from imagedaemon.utils.paths import ENV_FILE
+from imagedaemon.utils.paths import CAL_DATA_DIR, ENV_FILE
 from imagedaemon.utils.serialization import sanitize_for_serialization
 
 log = logging.getLogger("imagedaemon.pipeline")
@@ -178,10 +181,100 @@ class BasePipelines:
             return info
 
     # ======================================================================
+    #  Methods for creating calibration master frames
+    # ======================================================================
+    def scan_directory(
+        self, path: str | Path, *, pattern: str = "*.fits"
+    ) -> pd.DataFrame:
+        """
+        Index *path* and return a DataFrame with columns
+            filepath | filename | obstype | exposure | top_level_header | headers
+        """
+        path = Path(path)
+        records: List[Dict] = []
+
+        for fits_path in path.glob(pattern):
+            try:
+                img = self._load_raw_image(str(fits_path))  # only headers read
+
+                # ---- OBSTYPE -------------------------------------------------
+                obstype = self._get_obstype(img)
+
+                # ---- EXPOSURE -----------------------------------------------
+                exposure = self._get_exptime(img)
+
+                records.append(
+                    dict(
+                        filepath=fits_path,
+                        filename=fits_path.name,
+                        obstype=obstype,
+                        exposure=exposure,
+                    )
+                )
+
+            except Exception as exc:
+                logging.warning("Could not open %s: %s", fits_path.name, exc)
+
+        return pd.DataFrame(records)
+
+    def build_master_frames(
+        self,
+        *,
+        obstype: str,
+        src_dir: str | Path,
+        dst_dir: Optional[str | Path] = None,
+    ) -> None:
+        """
+        Make master frames for all exposure time values of a given OBSTYPE
+        (e.g. 'DARK' or 'BIAS') found in *src_dir*.
+        """
+        src_dir = Path(src_dir)
+
+        if dst_dir is None:
+            dst_dir = os.path.join(
+                CAL_DATA_DIR, self.meta.name, "master" + obstype.lower()
+            )
+
+        dst_dir = Path(dst_dir)
+        dst_dir.mkdir(parents=True, exist_ok=True)
+
+        df = self.scan_directory(src_dir)
+        print(df)
+        df = df[df.obstype == obstype.upper()]
+
+        if df.empty:
+            logging.warning("No %s frames found in %s", obstype, src_dir)
+            return
+
+        for exp_val, grp in df.groupby("exposure"):
+            logging.info(
+                "Combining %d %s frames at exposure time=%s",
+                len(grp),
+                obstype.upper(),
+                exp_val,
+            )
+
+            images = [self._load_raw_image(str(p)) for p in grp.filepath]
+
+            # median combine the raw data from the images
+            # median combine the images
+            data_list = [im.data for im in images]
+            median_data = calibration.median_combine(data_list)
+
+            # combine the headers
+            header = self._intersect_headers([im.header for im in images])
+
+            outname = f"{self.meta.name}_master{obstype.lower()}_{exp_val:.3f}s.fits"
+
+            # make a master Image object
+            master = Image(median_data, header)
+
+            master.save_image(str(dst_dir / outname))
+            logging.info("  --> %s", outname)
+
+    # ======================================================================
     #   PUBLIC – batch calibration for focus loops
     # ======================================================================
-    from pathlib import Path
-
     def calibrate_for_focus(
         self,
         image_paths: list[str | Path],
@@ -727,6 +820,15 @@ class BasePipelines:
         """
         return img.header["EXPTIME"]
 
+    def _get_obstype(self, img: Image) -> str:
+        """
+        Return the OBSTYPE of the image.
+
+        Default: read from the header.
+        """
+        obstype = img.header.get("OBSTYPE", "UNKNOWN")
+        return str(obstype).upper()
+
     def _load_dark(self, exptime: float):  # noqa: D401
         """Return the master‑dark Image that matches *img* (override)."""
         raise CalibrationError("Dark frames not supported for this camera")
@@ -868,7 +970,7 @@ class BasePipelines:
         results = sanitize_for_serialization(results)
         return results
 
-    # ----- astrometry helpers ---------------------------------------------
+    # ----- header helpers ---------------------------------------------
     def _get_radeg_from_header(self, header) -> float:
         """
         Get the RA from the header.
@@ -880,6 +982,14 @@ class BasePipelines:
         Get the Dec from the header.
         """
         return header["DECDEG"]
+
+    def _intersect_headers(headers: List["fits.Header"]) -> "fits.Header":
+        """Return a header containing only cards identical in every header."""
+        out = headers[0].copy()
+        for key in list(out.keys()):
+            if any(h.get(key) != out[key] for h in headers[1:]):
+                del out[key]
+        return out
 
     # ----- raw image loading ---------------------------------------------
     def _load_raw_image(
