@@ -326,7 +326,7 @@ class BasePipelines:
                 # save the dither flat to a tmp directory to verify it is working
                 import os
 
-                tmpdir = os.path.join(os.getenv("HOME"), "data", "tmp")
+                tmpdir = os.path.join(os.path.expanduser("~"), "data", "tmp")
                 dither_flat_image = Image(pre["dither_flat"])
                 dither_flat_image.save_image(
                     os.path.join(tmpdir, f"{addr}_test_dither_flat.fits")
@@ -838,9 +838,15 @@ class BasePipelines:
         obstype = img.header.get("OBSTYPE", "UNKNOWN")
         return str(obstype).upper()
 
-    def _load_dark(self, exptime: float):  # noqa: D401
+    def _load_dark(self, exptime: float, addr: str | None) -> Image:
         """Return the master‑dark Image that matches *img* (override)."""
-        raise CalibrationError("Dark frames not supported for this camera")
+        dark_path = Path(self.meta.dark_dir) / f"{self.meta.name}_masterdark_{exptime:.3f}s.fits"
+        if not dark_path.exists():
+            raise FileNotFoundError(f"master‑dark missing: {dark_path}")
+
+        img = self._load_raw_image(dark_path)
+        log.debug("Loaded master‑dark  exp=%.3fs  addr=%s", exptime, addr)
+        return img
 
     def _load_lab_flat(self) -> Image:
         raise CalibrationError("Lab flats not supported for this camera")

@@ -18,7 +18,7 @@ class PirtMeta(BaseMeta):
         "remove_horizontal_stripes": False,
         "mask": False,
         "mask_hot_pixels": True,
-        "replace_nans_with_median": True,
+        "replace_nans_with_median": False,
         "replace_nans_with_local_median": False,
     }
     # focus steps
@@ -30,7 +30,7 @@ class PirtMeta(BaseMeta):
         "sky_flat": False,
         "remove_horizontal_stripes": False,
         "mask": False,
-        "mask_hot_pixels": False,
-        "replace_nans_with_median": True,
+        "mask_hot_pixels": True,
+        "replace_nans_with_median": False,
         "replace_nans_with_local_median": False,
     }
