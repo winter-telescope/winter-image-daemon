@@ -14,6 +14,8 @@ from imagedaemon.processing.calibration import CalibrationError
 from imagedaemon.processing.focus import fit_parabola, parabola
 from imagedaemon.processing.sextractor import get_img_fwhm
 from imagedaemon.utils.image import Image  # thin wrapper around FITS/WCS
+from imagedaemon.utils.notify import SlackNotifier
+from imagedaemon.utils.paths import ENV_FILE
 from imagedaemon.utils.serialization import sanitize_for_serialization
 
 log = logging.getLogger("imagedaemon.pipeline")
@@ -516,7 +518,15 @@ class BasePipelines:
     # focus loop orchestrator
     # ------------ orchestrator --------------------------------------------
 
-    def run_focus_loop(self, image_list, *, addrs=None, output_dir=None, **opts):
+    def run_focus_loop(
+        self,
+        image_list,
+        *,
+        addrs=None,
+        output_dir=None,
+        post_plot_to_slack=False,
+        **opts,
+    ):
         """
         Generic driver – *pipeline* is a {Winter,Qcmos,…}Pipelines instance.
 
@@ -562,85 +572,14 @@ class BasePipelines:
                 }
         """
         # ------------------------------------------------------------------
-        # 3. fit each sensor separately  +  plot
+        # 3. plot the results
         # ------------------------------------------------------------------
-        focus_positions = np.asarray(fwhm_dict["focus_positions"])
-        sensors_dict = fwhm_dict["sensors"]  # {'pa': {...}, 'pb': {...}, …}
-
-        n_panels = len(sensors_dict) + 1  # +1 for the global view
-        fig, axes = plt.subplots(
-            nrows=n_panels,
-            ncols=1,
-            figsize=(6, 3 * n_panels),
-            sharex=True,
+        results = self._analyze_and_plot_fwhm_results(
+            fwhm_dict,
+            outdir=outdir,
+            post_plot_to_slack=post_plot_to_slack,
         )
 
-        # Matplotlib quirk: when nrows == 1, axes is a single Axes object
-        if not isinstance(axes, (list, np.ndarray)):
-            axes = [axes]
-
-        per_sensor = {}
-
-        # ---------- per‑sensor fits ----------
-        for ax, (addr, vals) in zip(axes[:-1], sensors_dict.items()):
-            med = np.asarray(vals["fwhm_median"])
-            std = np.asarray(vals["fwhm_std"])
-            foc = focus_positions
-
-            popt = fit_parabola(foc, med, std)  # [best_focus, a, b] etc.
-            xgrid = np.linspace(foc.min(), foc.max(), 200)
-
-            ax.errorbar(foc, med, yerr=std, fmt="o", label=f"{addr}")
-            ax.plot(xgrid, parabola(xgrid, *popt), label=f"best = {popt[0]:.1f}")
-            ax.set_ylabel("FWHM [arcsec]")
-            ax.legend(frameon=False, loc="upper center", ncols=2)
-
-            per_sensor[addr] = {
-                "best_focus": float(popt[0]),
-                "focus": foc.tolist(),
-                "fwhm_median": med.tolist(),
-                "fwhm_std": std.tolist(),
-            }
-
-        # ------------------------------------------------------------------
-        # 4. global (stacked) fit  +  plot
-        # ------------------------------------------------------------------
-        global_med = np.asarray(fwhm_dict["median"]["fwhm_median"])
-        global_std = np.asarray(fwhm_dict["median"]["fwhm_std"])
-
-        p_global = fit_parabola(focus_positions, global_med, global_std)
-
-        ax_global = axes[-1]  # last panel
-        xgrid = np.linspace(focus_positions.min(), focus_positions.max(), 200)
-
-        ax_global.errorbar(
-            focus_positions, global_med, yerr=global_std, fmt="o", label="all sensors"
-        )
-        ax_global.plot(
-            xgrid, parabola(xgrid, *p_global), label=f"global best = {p_global[0]:.1f}"
-        )
-        ax_global.set_ylabel("FWHM [arcsec]")
-        ax_global.set_xlabel("FOCPOS")
-        ax_global.legend(frameon=False, loc="upper center", ncols=2)
-
-        plt.suptitle(f"Focus loop – global best = {p_global[0]:.1f}")
-
-        plot_path = outdir / "focusloop_all_sensors.png"
-        plt.savefig(plot_path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-
-        # ------------------------------------------------------------------
-
-        results = {
-            "best_focus": float(p_global[0]),
-            "per_sensor": per_sensor,
-            "plot": str(plot_path),
-            "results": fwhm_dict,
-        }
-
-        # clean up the results dictionary so that it only contains native python types and
-        # that the results are lists not np arrays. this is important for pyro serialization
-        results = sanitize_for_serialization(results)
         return results
 
     # ======================================================================
@@ -856,6 +795,78 @@ class BasePipelines:
         flat_img = Image(flat_data, header=images[0].header, mask=images[0].mask)
 
         return flat_img
+
+    # ----- focus analysis and plotting helpers ----------------------------
+    def _analyze_and_plot_fwhm_results(
+        self,
+        fwhm_dict: dict,
+        outdir: Path | str,
+        post_plot_to_slack: bool = False,
+    ) -> dict:
+        """
+        Analyze the FWHM results and plot them.
+        Returns a dictionary with the results and paths to the plots.
+        """
+
+        # ------------------------------------------------------------------
+        # calculate and plot median focus results
+        # ------------------------------------------------------------------
+
+        focus_positions = np.asarray(fwhm_dict["focus_positions"])
+        fig, ax_global = plt.subplots(
+            nrows=1,
+            ncols=1,
+            figsize=(6, 6),
+            sharex=True,
+        )
+
+        global_med = np.asarray(fwhm_dict["median"]["fwhm_median"])
+        global_std = np.asarray(fwhm_dict["median"]["fwhm_std"])
+
+        p_global = fit_parabola(focus_positions, global_med, global_std)
+
+        xgrid = np.linspace(focus_positions.min(), focus_positions.max(), 200)
+
+        ax_global.errorbar(
+            focus_positions, global_med, yerr=global_std, fmt="o", label="all sensors"
+        )
+        ax_global.plot(
+            xgrid, parabola(xgrid, *p_global), label=f"global best = {p_global[0]:.1f}"
+        )
+        ax_global.set_ylabel("FWHM [arcsec]")
+        ax_global.set_xlabel("FOCPOS")
+        ax_global.legend(frameon=False, loc="upper center", ncols=2)
+
+        plt.suptitle(f"Focus loop – global best = {p_global[0]:.1f}")
+
+        plot_path = outdir / "focusloop_all_sensors.png"
+        plt.savefig(plot_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+        # ------------------------------------------------------------------
+
+        results = {
+            "best_focus": float(p_global[0]),
+            "per_sensor": {},
+            "plot": str(plot_path),
+            "results": fwhm_dict,
+        }
+
+        if post_plot_to_slack:
+            try:
+                notifier = SlackNotifier(env_file=ENV_FILE)
+                notifier.post_image(
+                    plot_path,
+                    text=f"Ran the focus script and got best focus = {results['best_focus']:.1f}",
+                )
+            except Exception as e:
+                log.error("Failed to post focus loop results to Slack: %s", e)
+        # ------------------------------------------------------------------
+
+        # clean up the results dictionary so that it only contains native python types and
+        # that the results are lists not np arrays. this is important for pyro serialization
+        results = sanitize_for_serialization(results)
+        return results
 
     # ----- astrometry helpers ---------------------------------------------
     def _get_radeg_from_header(self, header) -> float:
