@@ -13,7 +13,7 @@ class PirtMeta(BaseMeta):
     cal_steps: dict[str, bool] = {
         "dark": True,
         "lab_flat": False,
-        "dither_flat": True,
+        "dither_flat": False,
         "sky_flat": False,
         "remove_horizontal_stripes": False,
         "mask": False,
@@ -26,7 +26,7 @@ class PirtMeta(BaseMeta):
     focus_cal_steps: dict[str, bool] = {
         "dark": True,
         "lab_flat": False,
-        "dither_flat": True,
+        "dither_flat": False,
         "sky_flat": False,
         "remove_horizontal_stripes": False,
         "mask": False,

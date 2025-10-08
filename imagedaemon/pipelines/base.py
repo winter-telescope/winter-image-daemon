@@ -120,6 +120,12 @@ class BasePipelines:
         -------
         astropy.wcs.WCS
         """
+
+        log.debug(
+            f"running get_astrometric_solution for {science_image}, astrometry_opts = {astrometry_opts} "
+        )
+        print("we are here we are here")
+
         # ------------------------------------------------------------------
         # 1. calibrate the raw frame ---------------------------------------
         calibrated = self.calibrate_image(
@@ -159,24 +165,25 @@ class BasePipelines:
 
         # ------------------------------------------------------------------
         # 4. RA/Dec guess --------------------------------------------------
-        ra = astrometry_opts.pop("ra", None) or self._get_radeg_from_header(
-            calibrated.header
-        )
-        dec = astrometry_opts.pop("dec", None) or self._get_decdeg_from_header(
-            calibrated.header
-        )
+        print(f"astrometry_opts = {astrometry_opts}")
+        ra = astrometry_opts.get("ra", None)
+        if ra is None:
+            ra = self._get_radeg_from_header(calibrated.header)
+
+        dec = astrometry_opts.get("dec", None)
+        if dec is None:
+            dec = self._get_decdeg_from_header(calibrated.header)
+
+        print(f"RA, Dec = {ra}, {dec}")
         if ra is None or dec is None:
             raise ValueError("Supply ra=<deg>, dec=<deg> or keep them in the header.")
-
         # ------------------------------------------------------------------
         # 5. run solve‑field in the same work dir --------------------------
         with cleanup_ctx:  # deletes tmp dir if needed
             info = astrometry.run_astrometry(
                 cal_path,
-                ra=ra,
-                dec=dec,
                 output_dir=None,  # already in the right place
-                **astrometry_opts,
+                **astrometry_opts,  # includes ra,dec,scale_low,scale_high,...
             )
             return info
 
@@ -239,9 +246,7 @@ class BasePipelines:
             else:
                 foldername = f"master{obstype.lower()}s"
 
-            dst_dir = os.path.join(
-                CAL_DATA_DIR, self.meta.name, foldername
-            )
+            dst_dir = os.path.join(CAL_DATA_DIR, self.meta.name, foldername)
 
         dst_dir = Path(dst_dir)
         dst_dir.mkdir(parents=True, exist_ok=True)
@@ -274,7 +279,7 @@ class BasePipelines:
 
             # make the name
             outname = f"{self.meta.name}_master{obstype.lower()}_{exp_val:.3f}s.fits"
-           
+
             # make a master Image object
             master = Image(median_data, header)
 
@@ -840,7 +845,10 @@ class BasePipelines:
 
     def _load_dark(self, exptime: float, addr: str | None) -> Image:
         """Return the master‑dark Image that matches *img* (override)."""
-        dark_path = Path(self.meta.dark_dir) / f"{self.meta.name}_masterdark_{exptime:.3f}s.fits"
+        dark_path = (
+            Path(self.meta.dark_dir)
+            / f"{self.meta.name}_masterdark_{exptime:.3f}s.fits"
+        )
         if not dark_path.exists():
             raise FileNotFoundError(f"master‑dark missing: {dark_path}")
 
