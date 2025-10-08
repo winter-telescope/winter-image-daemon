@@ -42,10 +42,15 @@ class PyroThread(QtCore.QThread):
         else:
             self.ns_host = ns_host
         if daemon_host is None:
-            print(f"we don't want to use localhost for the daemon")
-            self.daemon_host = Pyro5.socketutil.get_ip_address(
-                "localhost", workaround127=True, version=4
-            )
+
+            # if the ns_host is on localhost, then we want to use localhost
+            if self.ns_host in ["localhost", "127.0.0.1"]:
+                self.daemon_host = "localhost"
+            else:
+                print(f"we don't want to use localhost for the daemon")
+                self.daemon_host = Pyro5.socketutil.get_ip_address(
+                    "localhost", workaround127=True, version=4
+                )
         else:
             self.daemon_host = daemon_host
         print(f"PyroThread for {self.name} on {self.daemon_host} (ns: {self.ns_host})")

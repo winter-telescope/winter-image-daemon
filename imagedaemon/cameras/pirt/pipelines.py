@@ -1,4 +1,4 @@
-# pipeline overrides for the qCMOS camera
+# pipeline overrides for the PIRT camera
 
 from __future__ import annotations
 
@@ -14,19 +14,19 @@ from imagedaemon.utils.paths import CAL_DATA_DIR
 # ----------------------------------------------------------------------
 # camera‑specific logger
 # ----------------------------------------------------------------------
-log = logging.getLogger("imagedaemon.camera.winter")
+log = logging.getLogger("imagedaemon.camera.pirt")
 
 
-class QcmosPipelines(BasePipelines):
+class PirtPipelines(BasePipelines):
     """
-    Pipelines for analyzing qCMOS images.
+    Pipelines for analyzing PIRT images.
     """
 
     # ----- raw image loader -------------------
     def _load_raw_image(self, path: str | Path, *, addr: str | None=None) -> Image:
         path = Path(path)
         if not path.exists():
-            raise FileNotFoundError(f"[qCMOS] raw image not found: {path}")
+            raise FileNotFoundError(f"[PIRT] raw image not found: {path}")
         img = Image(path)
         log.debug("Loaded raw image %s from %s", addr, path.name)
         return img
@@ -35,7 +35,7 @@ class QcmosPipelines(BasePipelines):
         """
         Get the exposure time from the image header.
         """
-        exptime_key = "EXPOSURE TIME"
+        exptime_key = "EXPTIME"
         exptime = img.header.get(exptime_key)
         if exptime is None:
             raise ValueError(f"{exptime_key} not found in header of {img.path}")
