@@ -19,7 +19,7 @@ chmod +x /home/winter/GIT/winter-image-daemon/imagedaemon/services/linux/run_ima
 Copy the service file into your user systemd directory:
 
 ```bash:
-sudo cp /home/winter/GIT/winter-image-daemon/services/linux/imagedaemon.service /etc/systemd/system/imagedaemon.service
+sudo cp /home/winter/GIT/winter-image-daemon/imagedaemon/services/linux/imagedaemon.service /etc/systemd/system/imagedaemon.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now imagedaemon.service
 
@@ -38,7 +38,7 @@ sudo journalctl -u imagedaemon.service -f
 Edit `/etc/systemd/system/imagedaemon.service` and change the `ExecStart` line's arguments:
 
 ```ini:
-ExecStart=/home/winter/GIT/winter-image-daemon/services/linux/run_imagedaemon.sh \
+ExecStart=/home/winter/GIT/winter-image-daemon/imagedaemon/services/linux/run_imagedaemon.sh \
   --cameras winter,qcmos,summer-ccd,pirt \
   -n 192.168.1.10 \
   --logfile /home/winter/data/imagedaemon.log
