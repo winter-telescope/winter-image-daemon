@@ -1,12 +1,15 @@
 # daemon/base_daemon.py
 import logging
+import os
 import signal
 import sys
 
-from PySide6 import QtCore, QtWidgets
+# Force Qt to use offscreen platform (no display needed)
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6 import QtCore
 
 
-class ImageDaemon(QtWidgets.QApplication):
+class ImageDaemon(QtCore.QCoreApplication):
     def __init__(self, camera_names: list[str], *, ns_host: str | None, log=None):
         super().__init__(sys.argv)
 
