@@ -165,20 +165,24 @@ class BasePipelines:
 
         # ------------------------------------------------------------------
         # 4. RA/Dec guess --------------------------------------------------
-        print(f"astrometry_opts = {astrometry_opts}")
         ra = astrometry_opts.get("ra", None)
         if ra is None:
             ra = self._get_radeg_from_header(calibrated.header)
-
+            # add to astrometry_opts
+            astrometry_opts["ra"] = ra
         dec = astrometry_opts.get("dec", None)
         if dec is None:
             dec = self._get_decdeg_from_header(calibrated.header)
+            astrometry_opts["dec"] = dec
 
         print(f"RA, Dec = {ra}, {dec}")
         if ra is None or dec is None:
             raise ValueError("Supply ra=<deg>, dec=<deg> or keep them in the header.")
+
         # ------------------------------------------------------------------
         # 5. run solve‑field in the same work dir --------------------------
+        print(f"astrometry_opts = {astrometry_opts}")
+
         with cleanup_ctx:  # deletes tmp dir if needed
             info = astrometry.run_astrometry(
                 cal_path,
