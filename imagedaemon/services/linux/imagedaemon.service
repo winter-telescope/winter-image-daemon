@@ -12,7 +12,6 @@ ExecStart=/home/winter/GIT/winter-image-daemon/services/linux/run_imagedaemon.sh
   -n 192.168.1.10 \
   --logfile /home/winter/data/imagedaemon.log
 Restart=always
-RestartSec=5
 StandardOutput=journal
 StandardError=journal
 
