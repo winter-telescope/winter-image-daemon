@@ -7,7 +7,7 @@ After=network-online.target
 Type=simple
 User=winter
 WorkingDirectory=/home/winter/GIT/winter-image-daemon
-ExecStart=/home/winter/GIT/winter-image-daemon/services/linux/run_imagedaemon.sh \
+ExecStart=/home/winter/GIT/winter-image-daemon/imagedaemon/services/linux/run_imagedaemon.sh \
   --cameras winter,qcmos,summer-ccd,pirt \
   -n 192.168.1.10 \
   --logfile /home/winter/data/imagedaemon.log

@@ -12,7 +12,7 @@ Repo paths assumed:
 ## 1) Make launcher executable
 
 ```bash
-chmod +x /home/winter/GIT/winter-image-daemon/services/linux/run_imagedaemon.sh
+chmod +x /home/winter/GIT/winter-image-daemon/imagedaemon/services/linux/run_imagedaemon.sh
 
 ```
 ## 2) Install the systemd unit
