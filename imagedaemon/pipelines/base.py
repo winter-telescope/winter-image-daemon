@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 from typing import Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
+import time
 import pandas as pd
 from astropy.io import fits
 from matplotlib import pyplot as plt
@@ -92,7 +93,10 @@ class BasePipelines:
         # 4. return new Image instance
         return Image(data_cal, img.header, mask=img.mask)
 
-    def get_astrometric_solution(
+    import time
+from pathlib import Path
+
+def get_astrometric_solution(
         self,
         *,
         addr: str | None = None,
@@ -100,6 +104,8 @@ class BasePipelines:
         background_image_list: Sequence[str] | None = None,
         override_steps: dict[str, bool] | None = None,
         output_dir: Path | str | None = None,  # None | path | "tmp"
+        file_wait_timeout: float = 35.0,  # seconds to wait for file
+        poll_interval: float = 1.0,  # seconds between checks
         **astrometry_opts,
     ):
         """
@@ -113,6 +119,11 @@ class BasePipelines:
             • None  → run solve‑field where the calibrated FITS is written
             • Path  → copy the calibrated FITS there and keep artefacts
             • "tmp" → run in a TemporaryDirectory that is deleted afterwards
+        file_wait_timeout
+            Maximum seconds to wait for science_image and background images to appear (default: 35s).
+            Set to 0 to disable waiting.
+        poll_interval
+            Seconds between checks for the appearance of the required files (default: 1s).
         astrometry_opts
             Extra hints passed to `run_astrometry` (scale bounds, RA/Dec, …).
 
@@ -127,6 +138,41 @@ class BasePipelines:
         print("we are here we are here")
 
         # ------------------------------------------------------------------
+        # 0. Wait for all required image files to appear -------------------
+        required_files = [Path(science_image).expanduser()]
+        if background_image_list:
+            required_files.extend([Path(bg).expanduser() for bg in background_image_list])
+        
+        missing_files = [f for f in required_files if not f.exists()]
+        
+        if missing_files and file_wait_timeout > 0:
+            log.info(f"Waiting for {len(missing_files)} file(s) to appear (timeout: {file_wait_timeout}s)...")
+            for f in missing_files:
+                log.info(f"  - {f}")
+            
+            start_time = time.time()
+            
+            while missing_files:
+                elapsed = time.time() - start_time
+                if elapsed >= file_wait_timeout:
+                    raise FileNotFoundError(
+                        f"Timeout waiting for files after {file_wait_timeout:.1f}s. "
+                        f"Still missing: {[str(f) for f in missing_files]}"
+                    )
+                
+                # Log progress every ~10s
+                if int(elapsed) % 10 == 0 and elapsed > 0:
+                    log.debug(f"Still waiting for {len(missing_files)} file(s)... ({elapsed:.0f}s elapsed)")
+                
+                time.sleep(poll_interval)
+                
+                # Re-check which files are still missing
+                missing_files = [f for f in required_files if not f.exists()]
+            
+            wait_time = time.time() - start_time
+            log.info(f"All files appeared after {wait_time:.1f}s")
+
+        # ------------------------------------------------------------------
         # 1. calibrate the raw frame ---------------------------------------
         calibrated = self.calibrate_image(
             addr=addr,
@@ -135,7 +181,7 @@ class BasePipelines:
             override_steps=override_steps,
         )
 
-        raw_path = Path(science_image)
+        raw_path = Path(science_image).expanduser()
 
         # ------------------------------------------------------------------
         # 2. choose where to write IMG.cal.fits ----------------------------
@@ -190,7 +236,6 @@ class BasePipelines:
                 **astrometry_opts,  # includes ra,dec,scale_low,scale_high,...
             )
             return info
-
     # ======================================================================
     #  Methods for creating calibration master frames
     # ======================================================================
@@ -636,25 +681,69 @@ class BasePipelines:
         addrs=None,
         output_dir=None,
         post_plot_to_slack=False,
+        file_wait_timeout: float = 35.0,  # seconds to wait for files
+        poll_interval: float = 1.0,  # seconds between checks
         **opts,
     ):
         """
-        Generic driver – *pipeline* is a {Winter,Qcmos,…}Pipelines instance.
+        Generic driver – *pipeline* is a {Winter,Qcmos,…}Pipelines instance.
 
         Parameters
         ----------
         image_list   list[str]       raw images belonging to one focus sweep
         addrs        list[str]|None  subset of sensors (WINTER) or None
         output_dir   str|Path|None   where to drop plots & intermediates
+        post_plot_to_slack bool     Whether to post the focus plot to Slack.
+        file_wait_timeout float      Maximum seconds to wait for images to appear (default: 35s).
+                                     Set to 0 to disable waiting.
+        poll_interval    float       Seconds between checks for the appearance of the required files (default: 1s).
+        
         """
         outdir = Path(output_dir or self.meta.focus_output_dir).expanduser()
         outdir.mkdir(parents=True, exist_ok=True)
 
         # ------------------------------------------------------------------
+        # 0. Expand paths and wait for all image files to appear ----------
+        # ------------------------------------------------------------------
+        expanded_image_list = [Path(img).expanduser() for img in image_list]
+        missing_files = [f for f in expanded_image_list if not f.exists()]
+        
+        if missing_files and file_wait_timeout > 0:
+            log.info(f"Waiting for {len(missing_files)} image file(s) to appear (timeout: {file_wait_timeout}s)...")
+            for f in missing_files:
+                log.info(f"  - {f}")
+            
+            start_time = time.time()
+            
+            while missing_files:
+                elapsed = time.time() - start_time
+                if elapsed >= file_wait_timeout:
+                    raise FileNotFoundError(
+                        f"Timeout waiting for files after {file_wait_timeout:.1f}s. "
+                        f"Still missing: {[str(f) for f in missing_files]}"
+                    )
+                
+                # Log progress every ~10s
+                if int(elapsed) % 10 == 0 and elapsed > 0:
+                    log.debug(f"Still waiting for {len(missing_files)} file(s)... ({elapsed:.0f}s elapsed)")
+                
+                time.sleep(poll_interval)
+                
+                # Re-check which files are still missing
+                missing_files = [f for f in expanded_image_list if not f.exists()]
+            
+            wait_time = time.time() - start_time
+            log.info(f"All {len(expanded_image_list)} image files appeared after {wait_time:.1f}s")
+
+        # Convert back to strings for downstream methods (in case they expect strings)
+        # Use the expanded paths to ensure consistency
+        image_list_to_process = [str(img) for img in expanded_image_list]
+
+        # ------------------------------------------------------------------
         # 1. load & quick‑calibrate
         # ------------------------------------------------------------------
         calibrated_images_dict = self.calibrate_for_focus(
-            image_list, out_dir=outdir, **opts
+            image_list_to_process, out_dir=outdir, **opts
         )
 
         # ------------------------------------------------------------------
