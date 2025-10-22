@@ -6,6 +6,8 @@ import Pyro5.server
 from astropy.coordinates import SkyCoord
 from PySide6 import QtCore
 
+from imagedaemon.utils.notify import SlackNotifier
+from imagedaemon.utils.paths import ENV_FILE
 from imagedaemon.utils.wcs_utils import pix2sky
 
 from .rpc import register_object  # helper we'll define below
@@ -18,6 +20,7 @@ class CameraWorker(QtCore.QObject):
         self.pipelines = pipelines
         self.log = logging.getLogger(f"imagedaemon.{name}")
         self.daemon_thread = register_object(self, f"{name}_daemon", ns_host)
+        self.notifier = SlackNotifier(env_file=ENV_FILE)
 
     def shutdown(self):
         self.daemon_thread.stop()
@@ -79,6 +82,7 @@ class CameraWorker(QtCore.QObject):
         image_list: list[str],
         addrs: Optional[str] = None,
         output_dir: Optional[str] = None,
+        post_plot: bool = False,
         **kwargs,
     ):
         """run a focus loop on the specified image list.
@@ -92,6 +96,17 @@ class CameraWorker(QtCore.QObject):
             output_dir=output_dir,
             **kwargs,
         )
+
+        if post_plot:
+            try:
+                image_path = results.get("plot", None)
+                if image_path:
+                    text = f"Focus Results: Best Focus = {results.get('best_focus', 0):0.1f})"
+                    self.notifier.post_image(image_path=image_path, text=text)
+                else:
+                    self.log.warning("No focus plot found to post to Slack")
+            except Exception as e:
+                self.log.error(f"Error posting focus plot to Slack: {e}")
         return results
 
     @Pyro5.server.expose
