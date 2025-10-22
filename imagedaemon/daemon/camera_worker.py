@@ -1,5 +1,6 @@
 # daemon/camera_worker.py
 import logging
+from typing import Optional
 
 import Pyro5.server
 from astropy.coordinates import SkyCoord
@@ -74,7 +75,11 @@ class CameraWorker(QtCore.QObject):
 
     @Pyro5.server.expose
     def run_focus_loop(
-        self, image_list: list[str], addrs: str, output_dir: str, **kwargs
+        self,
+        image_list: list[str],
+        addrs: Optional[str] = None,
+        output_dir: Optional[str] = None,
+        **kwargs,
     ):
         """run a focus loop on the specified image list.
         For multiple sensor images (e.g. WINTER), optional
