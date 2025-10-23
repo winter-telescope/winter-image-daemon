@@ -710,13 +710,13 @@ class BasePipelines:
         poll_interval    float       Seconds between checks for the appearance of the required files (default: 1s).
 
         """
-        outdir = Path(output_dir or self.meta.focus_output_dir).expanduser()
+        outdir = normalize_filepath(output_dir or self.meta.focus_output_dir)
         outdir.mkdir(parents=True, exist_ok=True)
 
         # ------------------------------------------------------------------
         # 0. Expand paths and wait for all image files to appear ----------
         # ------------------------------------------------------------------
-        expanded_image_list = [Path(img).expanduser() for img in image_list]
+        expanded_image_list = [normalize_filepath(img) for img in image_list]
         missing_files = [f for f in expanded_image_list if not f.exists()]
 
         if missing_files and file_wait_timeout > 0:
