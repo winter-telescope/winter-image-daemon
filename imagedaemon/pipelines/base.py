@@ -399,7 +399,7 @@ class BasePipelines:
             out_files: list[Path] = []
 
             # now calibrate each one
-            for raw_path, im in zip(raw_for_this_sensor, sensor_imgs):
+            for raw_path, im in zip(raw_for_this_sensor, }):
                 data_cal = self._calibrate_data(
                     im.data.copy(),
                     mask=im.mask,
@@ -1137,7 +1137,8 @@ class BasePipelines:
         self,
         image_list: list[str | Path | Image],
     ) -> dict:  # make a list of Image objects
-        images = [Image(path) if isinstance(path, str) else path for path in image_list]
+        images = [Image(path) if isinstance(path, (str, Path)) else path for path in image_list]
+        
         if not images:
             raise ValueError("No images to calibrate")
         if len(images) < 4:
