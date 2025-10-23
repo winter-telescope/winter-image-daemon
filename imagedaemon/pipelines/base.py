@@ -19,7 +19,7 @@ from imagedaemon.processing.focus import fit_parabola, parabola
 from imagedaemon.processing.sextractor import get_img_fwhm
 from imagedaemon.utils.image import Image  # thin wrapper around FITS/WCS
 from imagedaemon.utils.notify import SlackNotifier
-from imagedaemon.utils.paths import CAL_DATA_DIR, ENV_FILE
+from imagedaemon.utils.paths import CAL_DATA_DIR, ENV_FILE, normalize_filepath
 from imagedaemon.utils.serialization import sanitize_for_serialization
 
 log = logging.getLogger("imagedaemon.pipeline")
@@ -70,6 +70,7 @@ class BasePipelines:
             self.meta.name,
             science_image,
         )
+        science_image = normalize_filepath(science_image)
 
         # 1. decide which steps to perform
         steps = self._decide_steps(override_steps)
@@ -133,13 +134,14 @@ class BasePipelines:
             f"running get_astrometric_solution for {science_image}, astrometry_opts = {astrometry_opts} "
         )
         print("we are here we are here")
+        science_image = normalize_filepath(science_image)
 
         # ------------------------------------------------------------------
         # 0. Wait for all required image files to appear -------------------
         required_files = [Path(science_image).expanduser()]
         if background_image_list:
             required_files.extend(
-                [Path(bg).expanduser() for bg in background_image_list]
+                [normalize_filepath(bg) for bg in background_image_list]
             )
 
         missing_files = [f for f in required_files if not f.exists()]
@@ -255,6 +257,7 @@ class BasePipelines:
 
         for fits_path in path.glob(pattern):
             try:
+                fits_path = normalize_filepath(fits_path)
                 img = self._load_raw_image(str(fits_path))  # only headers read
 
                 # ---- OBSTYPE -------------------------------------------------
@@ -320,7 +323,9 @@ class BasePipelines:
                 exp_val,
             )
 
-            images = [self._load_raw_image(str(p)) for p in grp.filepath]
+            images = [
+                self._load_raw_image(str(normalize_filepath(p))) for p in grp.filepath
+            ]
 
             # median combine the raw data from the images
             # median combine the images
@@ -350,6 +355,8 @@ class BasePipelines:
         out_dir: str | Path | None = None,
         **opts,
     ) -> dict[str, list[Path]]:
+        # normalize input paths
+        image_paths = [normalize_filepath(p) for p in image_paths]
         image_dict = self._load_focus_images(image_paths)
         if not image_dict:
             raise ValueError("No images to calibrate")
@@ -952,6 +959,7 @@ class BasePipelines:
             Path(self.meta.dark_dir)
             / f"{self.meta.name}_masterdark_{exptime:.3f}s.fits"
         )
+        dark_path = normalize_filepath(dark_path)
         if not dark_path.exists():
             raise FileNotFoundError(f"master‑dark missing: {dark_path}")
 
@@ -1122,6 +1130,7 @@ class BasePipelines:
         self, path: str | Path, *, addr: list[str] | str | None
     ) -> Image:
         """Default: just read the FITS; no sensor selection."""
+
         return Image(path)
 
     def _load_focus_images(

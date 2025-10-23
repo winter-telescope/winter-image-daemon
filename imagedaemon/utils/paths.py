@@ -13,6 +13,55 @@ ENV_FILE = GIT_REPO_ROOT / ".env"
 load_dotenv(dotenv_path=ENV_FILE, override=False)  # keeps any values already set
 
 
+import os
+from pathlib import Path
+from typing import Union
+
+
+def normalize_filepath(filepath: Union[str, Path], expanduser: bool = True) -> Path:
+    """
+    Normalize a filepath by converting all slashes to forward slashes and optionally
+    expanding the user home directory.
+
+    Handles mixed Windows/Linux paths like: ~\data\images\20251022\spring/file.fits
+
+    Parameters
+    ----------
+    filepath : str or Path
+        The filepath to normalize. Can contain mixed forward/backslashes.
+    expanduser : bool, optional
+        If True, expand ~ to the user's home directory. Default is True.
+
+    Returns
+    -------
+    Path
+        A normalized Path object with consistent separators.
+
+    Examples
+    --------
+    >>> normalize_filepath(r"~\data\images\20251022\spring/file.fits")
+    PosixPath('/home/winter/data/images/20251022/spring/file.fits')
+
+    >>> normalize_filepath(r"~\data\images\file.fits", expanduser=False)
+    PosixPath('~/data/images/file.fits')
+    """
+    # Convert to string if Path object
+    if isinstance(filepath, Path):
+        filepath = str(filepath)
+
+    # Replace all backslashes with forward slashes
+    normalized = filepath.replace("\\", "/")
+
+    # Convert to Path object
+    path = Path(normalized)
+
+    # Expand user home directory if requested
+    if expanduser:
+        path = path.expanduser()
+
+    return path
+
+
 def get_path(name: str, default: str | Path | None = None) -> Path:
     """
     Return a pathlib.Path for the variable *name* defined in .env
@@ -58,7 +107,8 @@ SEXTRACTOR_NNW_FILE = get_path(
 )
 
 OUTPUT_DIR = get_path(
-    "OUTPUT_DIR", os.path.join(os.path.expanduser("~"), "data", "image-daemon-data", "output")
+    "OUTPUT_DIR",
+    os.path.join(os.path.expanduser("~"), "data", "image-daemon-data", "output"),
 )
 
 FOCUS_OUTPUT_DIR = os.path.join(OUTPUT_DIR, "focus")

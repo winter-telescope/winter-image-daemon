@@ -12,6 +12,7 @@ from astropy.visualization import ImageNormalize, SqrtStretch, ZScaleInterval
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from imagedaemon.utils.mask import mask_datasec
+from imagedaemon.utils.paths import normalize_filepath
 
 
 class Image:
@@ -61,6 +62,8 @@ class Image:
         :param filename:
         :return:
         """
+        # Convert to Path and expand user home directory
+        filepath = normalize_filepath(filepath)
         self.filename = os.path.basename(filepath)
         self.filepath = filepath
 
