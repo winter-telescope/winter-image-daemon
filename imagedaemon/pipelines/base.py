@@ -692,7 +692,7 @@ class BasePipelines:
         addrs=None,
         output_dir=None,
         post_plot_to_slack=False,
-        file_wait_timeout: float = 35.0,  # seconds to wait for files
+        file_wait_timeout: float = 90.0,  # seconds to wait for files
         poll_interval: float = 1.0,  # seconds between checks
         **opts,
     ):
