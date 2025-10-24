@@ -102,7 +102,7 @@ class BasePipelines:
         background_image_list: Sequence[str] | None = None,
         override_steps: dict[str, bool] | None = None,
         output_dir: Path | str | None = None,  # None | path | "tmp"
-        file_wait_timeout: float = 35.0,  # seconds to wait for file
+        file_wait_timeout: float = 60.0,  # seconds to wait for file
         poll_interval: float = 1.0,  # seconds between checks
         **astrometry_opts,
     ):
