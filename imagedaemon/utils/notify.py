@@ -24,12 +24,12 @@ class SlackNotifier:
         if env_file:
             load_dotenv(env_file)
 
-        token = os.getenv("SLACK_BOT_TOKEN")
+        token = os.getenv("SLACKBOT_TOKEN")
         channel = os.getenv("SLACK_CHANNEL")
         channel_id = os.getenv("SLACKBOT_CHANNEL_ID")
 
         if not token or not channel:
-            raise RuntimeError("SLACK_BOT_TOKEN and SLACK_CHANNEL must be set")
+            raise RuntimeError("SLACKBOT_TOKEN and SLACK_CHANNEL must be set")
 
         self.client = WebClient(token=token)
         self.channel = channel
